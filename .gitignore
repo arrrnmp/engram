@@ -1,0 +1,10 @@
+node_modules/
+server/node_modules/
+bun.lockb
+*.tgz
+.env
+config.local.json
+.chroma-data/
+.venv/
+certs/
+logs/

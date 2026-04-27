@@ -1,0 +1,8 @@
+[project]
+name = "engram"
+version = "0.1.0"
+description = "Engram AI Memory Database — Python dependencies"
+requires-python = ">=3.10"
+dependencies = [
+    "chromadb>=0.6.0",
+]

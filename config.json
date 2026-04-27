@@ -1,0 +1,32 @@
+{
+  "vault": {
+    "path": "~/Documents/engram-vault"
+  },
+  "server": {
+    "port": 7384,
+    "https": true,
+    "certFile": "/Users/aaron/Documents/engram/certs/localhost.pem",
+    "keyFile": "/Users/aaron/Documents/engram/certs/localhost-key.pem"
+  },
+  "chroma": {
+    "host": "http://localhost:8000",
+    "collection": "engrams"
+  },
+  "wikilinks": {
+    "threshold": 0.72,
+    "maxLinks": 5
+  },
+  "embedding": {
+    "provider": "auto",
+    "overheadBuffer": 0.25,
+    "ollama": {
+      "host": "http://localhost:11434"
+    },
+    "mlx": {
+      "host": "http://localhost:8080"
+    },
+    "nvidia": {
+      "host": "http://localhost:8001"
+    }
+  }
+}
