@@ -317,7 +317,13 @@ const TOOLS: ToolDef[] = [
       const currentUrl = entry?.args?.[1];
       if (currentUrl === mcpUrl) return "unchanged";
       const wasPresent = currentUrl !== undefined;
-      servers.engram = { command: "npx", args: ["mcp-remote", mcpUrl] };
+      // NODE_OPTIONS=--use-system-ca makes Node.js 24+ trust the macOS/Windows
+      // system keychain, so mkcert certificates validate without extra flags.
+      servers.engram = {
+        command: "npx",
+        args: ["mcp-remote", mcpUrl],
+        env: { NODE_OPTIONS: "--use-system-ca" },
+      };
       existing.mcpServers = servers;
       writeFileSync(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
       return wasPresent ? "updated" : "added";
