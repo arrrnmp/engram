@@ -1,48 +1,66 @@
 ---
 name: save-memory
-description: Save the current conversation as an Engram in the Engram memory database. Use when the user explicitly asks to save, remember, or record the current conversation or a specific topic discussed. Never run automatically — only when the user invokes /save-memory.
+description: Save the current conversation as one or more Engrams in the Engram memory database. Use when the user explicitly asks to save, remember, or record the current conversation or a specific topic discussed. Never run automatically — only when the user invokes /save-memory.
 disable-model-invocation: true
 user-invocable: true
-effort: medium
+effort: high
 compatibility: Requires the Engram MCP server to be running (http://localhost:7384/mcp). See the Engram repo for setup.
 metadata:
   author: engram
-  version: "0.1"
+  version: "0.2"
 ---
 
 # Save Memory
 
-You have been explicitly asked by the user to save the current conversation as an Engram.
+You have been explicitly asked by the user to save the current conversation as Engrams.
 
-## Steps
+The goal is maximum detail preservation. A future model reading these Engrams should understand exactly what happened, what was decided, and what was learned — as if they had been in the conversation. One compressed summary loses detail. Multiple focused Engrams preserve it.
 
-1. **Review the conversation** to identify what is worth remembering. Focus on:
-   - Key decisions, preferences, or facts the user shared
-   - Project context, goals, or constraints
-   - Personal details the user would want recalled in future sessions
-   - Technical choices or architectural decisions
+## Phase 1 — Full extraction pass
 
-2. **Compose the Engram content** in markdown. Write it as a clear, self-contained note that will make sense when read in isolation months from now. Write in **third person** — this is a note about the user for a future model to read, not a message to the user. Use "Aaron prefers…" or "The user prefers…", never "You prefer…". Do not reference the conversation meta ("you said", "we discussed") — write the facts directly.
+Go through the entire conversation from start to finish, chronologically. Do not filter or summarize yet — capture everything that could be worth remembering:
 
-3. **Choose a concise title** (3–8 words) that describes what was learned. Good: "Prefers TypeScript with Strict Mode". Poor: "Conversation about code".
+- Decisions made and the reasoning behind them
+- Preferences, opinions, or working style observations
+- Technical choices, constraints, or architectural directions
+- Personal context, goals, or background details
+- Problems solved and how they were resolved
+- Open questions or things left unresolved
+- Anything the user said that revealed how they think or what they care about
 
-4. **Call `save_memory`** with:
-   - `title`: the concise title you chose
-   - `content`: the markdown content you composed
-   - `date`: today's date in YYYY-MM-DD format (if you know it), otherwise omit
+Write this out as an internal structured draft. Completeness matters here — it is easier to discard detail later than to recover it.
 
-5. **Report back** to the user: confirm the Engram was saved and mention how many related memories were auto-linked (if any).
+## Phase 2 — Topic grouping
+
+From the extraction draft, identify 2–5 distinct topics. A good topic boundary is: would a future model searching for one thing also need the other? If yes, same Engram. If no, separate.
+
+Aim for focused, searchable topics — not one giant dump, not trivially small fragments.
+
+## Phase 3 — Write and save
+
+For each topic, compose a self-contained Engram and call `save_memory`:
+
+- **`title`**: 3–8 words, specific enough to be findable. Good: "Engram Server — Ollama Lifecycle Design". Poor: "Technical discussion".
+- **`content`**: Markdown. Write in **third person** — this is a note about Aaron for a future model, not a message to Aaron. Use "Aaron decided…", "Aaron prefers…", never "You decided…". Do not reference the conversation itself ("we discussed", "you mentioned") — write the facts directly as standing knowledge.
+- **`date`**: today's date in YYYY-MM-DD format.
+- **`type`**: use the most fitting category — `"chat"`, `"decision"`, `"code"`, `"idea"` — or omit if none fits.
+
+Call `save_memory` once per topic. Save them sequentially so wikilinks can cross-reference correctly.
+
+## Phase 4 — Report
+
+After all saves complete, tell the user:
+
+```
+Saved N engrams:
+- "Title 1" → 2026-04-28/title-1.md (linked to: X, Y)
+- "Title 2" → 2026-04-28/title-2.md
+- ...
+```
 
 ## What makes a good Engram
 
-- Self-contained: reads clearly without this conversation's context
-- Factual: states what was learned, not how the conversation went
-- Focused: one topic per Engram is better than one giant dump
-- Durable: written so it will still be accurate and useful in 6 months
-
-## Example output format
-
-```
-Engram saved: 2026-04-26/prefers-bun-over-node.md
-Linked to 2 related memories: project-goals, typescript-setup
-```
+- **Self-contained**: reads clearly without this conversation's context
+- **Factual**: states what was learned, not how the conversation went  
+- **Detailed**: preserves reasoning and nuance, not just conclusions
+- **Durable**: accurate and useful in 6 months
