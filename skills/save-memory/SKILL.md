@@ -1,6 +1,9 @@
 ---
 name: save-memory
 description: Save the current conversation as an Engram in the Engram memory database. Use when the user explicitly asks to save, remember, or record the current conversation or a specific topic discussed. Never run automatically — only when the user invokes /save-memory.
+disable-model-invocation: true
+user-invocable: true
+effort: medium
 compatibility: Requires the Engram MCP server to be running (http://localhost:7384/mcp). See the Engram repo for setup.
 metadata:
   author: engram

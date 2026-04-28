@@ -1,6 +1,9 @@
 ---
 name: prefill
 description: Load the user's persistent memory profile (IMPORTANT.md) into context. Use when the user invokes /prefill at the start of a conversation to give the model background about who they are and what they care about. Never run automatically.
+disable-model-invocation: true
+user-invocable: true
+effort: low
 compatibility: Requires the Engram MCP server to be running (http://localhost:7384/mcp).
 metadata:
   author: engram

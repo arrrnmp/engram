@@ -39,7 +39,7 @@
 ```markdown
 # About You
 
-You are [role] at [context]. You have [X] years of experience in [domain].
+[name] is [role] at [context]. He/she has [X] years of experience in [domain].
 
 ## Working Style
 ...

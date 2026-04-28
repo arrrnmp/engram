@@ -1,6 +1,9 @@
 ---
 name: update-important-memory
 description: Review all saved Engrams and rewrite IMPORTANT.md with a synthesized, up-to-date profile of the user. Run when the user invokes /update-important-memory. Never run automatically — this is a deliberate, user-triggered operation.
+disable-model-invocation: true
+user-invocable: true
+effort: high
 compatibility: Requires the Engram MCP server to be running (http://localhost:7384/mcp).
 metadata:
   author: engram
