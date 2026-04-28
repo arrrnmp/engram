@@ -304,6 +304,8 @@ const TOOLS: ToolDef[] = [
     skillsDir: null,
     mcpConfig: CLAUDE_DESKTOP_CONFIG,
     upsertMcp(mcpUrl) {
+      // Claude Desktop only supports stdio servers. mcp-remote bridges the gap
+      // by spawning as a stdio child process that proxies to the HTTP MCP endpoint.
       const configPath = this.mcpConfig!;
       mkdirSync(dirname(configPath), { recursive: true });
       let existing: Record<string, unknown> = {};
@@ -311,10 +313,11 @@ const TOOLS: ToolDef[] = [
         try { existing = JSON.parse(readFileSync(configPath, "utf-8")); } catch {}
       }
       const servers = (existing.mcpServers as Record<string, unknown> | undefined) ?? {};
-      const current = (servers.engram as { url?: string } | undefined)?.url;
-      if (current === mcpUrl) return "unchanged";
-      const wasPresent = current !== undefined;
-      servers.engram = { type: "http", url: mcpUrl };
+      const entry = servers.engram as { args?: string[] } | undefined;
+      const currentUrl = entry?.args?.[1];
+      if (currentUrl === mcpUrl) return "unchanged";
+      const wasPresent = currentUrl !== undefined;
+      servers.engram = { command: "npx", args: ["mcp-remote", mcpUrl] };
       existing.mcpServers = servers;
       writeFileSync(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
       return wasPresent ? "updated" : "added";
