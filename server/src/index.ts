@@ -96,7 +96,7 @@ function createSession(): Session {
   // ── Tool: save_memory ───────────────────────────────────────────────────────
   server.tool(
     "save_memory",
-    "Save a memory as an Engram. Writes a dated markdown file to the Obsidian vault, embeds it in the vector database, and auto-generates wikilinks to related memories.",
+    "Save a memory as an Engram. Writes a dated markdown file to the Obsidian vault, embeds it in the vector database, and auto-generates wikilinks to related memories. Optionally specify a type (e.g. \"code\", \"chat\", \"idea\", \"decision\") to categorize the memory.",
     SaveMemoryInput.shape,
     async (input) => {
       const { title } = input as z.infer<typeof SaveMemoryInput>;
@@ -115,7 +115,7 @@ function createSession(): Session {
   // ── Tool: search_memory ─────────────────────────────────────────────────────
   server.tool(
     "search_memory",
-    "Semantic search across all saved Engrams using a natural language query.",
+    "Semantic search across all saved Engrams using a natural language query. Optionally filter by type (e.g. \"code\", \"chat\", \"idea\", \"decision\").",
     SearchMemoryInput.shape,
     async (input) => {
       const { query, n_results } = input as z.infer<typeof SearchMemoryInput>;
@@ -174,8 +174,8 @@ function createSession(): Session {
     "List all saved Engrams, optionally filtered by date range.",
     ListEngramsInput.shape,
     async (input) => {
-      const { from, to } = input as z.infer<typeof ListEngramsInput>;
-      logger.info(`[tool] list_engrams: from=${from ?? "*"} to=${to ?? "*"}`);
+      const { date_range } = input as z.infer<typeof ListEngramsInput>;
+      logger.info(`[tool] list_engrams: from=${date_range?.from ?? "*"} to=${date_range?.to ?? "*"}`);
       try {
         const result = listEngrams(input as z.infer<typeof ListEngramsInput>, vault);
         logger.info(`[tool] list_engrams: ${result.engrams.length} engrams`);

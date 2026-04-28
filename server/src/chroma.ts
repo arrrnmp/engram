@@ -8,6 +8,7 @@ export interface EngramRecord {
   date: string;
   filename: string;
   vaultPath: string;
+  type?: string;
 }
 
 export interface SearchResult {
@@ -17,6 +18,7 @@ export interface SearchResult {
   filename: string;
   excerpt: string;
   similarity: number;
+  type?: string;
 }
 
 export class EngramChroma {
@@ -42,27 +44,29 @@ export class EngramChroma {
   }
 
   async upsert(record: EngramRecord, embedding: number[]): Promise<void> {
+    const metadata: Record<string, string> = {
+      title: record.title,
+      date: record.date,
+      filename: record.filename,
+      vaultPath: record.vaultPath,
+    };
+    if (record.type) metadata.type = record.type;
+
     await this.col.upsert({
       ids: [record.id],
       embeddings: [embedding],
       documents: [record.content],
-      metadatas: [
-        {
-          title: record.title,
-          date: record.date,
-          filename: record.filename,
-          vaultPath: record.vaultPath,
-        },
-      ],
+      metadatas: [metadata],
     });
   }
 
   async search(
     queryEmbedding: number[],
     nResults: number = 5,
-    dateRange?: { from?: string; to?: string }
+    dateRange?: { from?: string; to?: string },
+    type?: string
   ): Promise<SearchResult[]> {
-    const where = buildDateWhere(dateRange);
+    const where = buildWhere(dateRange, type);
 
     const results = await this.col.query({
       queryEmbeddings: [queryEmbedding],
@@ -81,13 +85,13 @@ export class EngramChroma {
       date: (metadatas[i]?.date as string) ?? "",
       filename: (metadatas[i]?.filename as string) ?? "",
       excerpt: truncate(documents[i] ?? "", 300),
-      // ChromaDB returns cosine distance (0 = identical, 2 = opposite)
       similarity: 1 - (distances[i] ?? 1),
+      type: (metadatas[i]?.type as string) ?? undefined,
     }));
   }
 
-  async getAll(dateRange?: { from?: string; to?: string }): Promise<SearchResult[]> {
-    const where = buildDateWhere(dateRange);
+  async getAll(dateRange?: { from?: string; to?: string }, type?: string): Promise<SearchResult[]> {
+    const where = buildWhere(dateRange, type);
 
     const results = await this.col.get({
       ...(where ? { where } : {}),
@@ -100,6 +104,7 @@ export class EngramChroma {
       filename: (results.metadatas[i]?.filename as string) ?? "",
       excerpt: truncate(results.documents[i] ?? "", 300),
       similarity: 1,
+      type: (results.metadatas[i]?.type as string) ?? undefined,
     }));
   }
 
@@ -108,15 +113,27 @@ export class EngramChroma {
   }
 }
 
-function buildDateWhere(
-  dateRange?: { from?: string; to?: string }
+function buildWhere(
+  dateRange?: { from?: string; to?: string },
+  type?: string
 ): Where | undefined {
-  if (!dateRange?.from && !dateRange?.to) return undefined;
-  if (dateRange.from && dateRange.to) {
-    return { $and: [{ date: { $gte: dateRange.from } }, { date: { $lte: dateRange.to } }] };
+  const conditions: Where[] = [];
+
+  if (dateRange?.from && dateRange?.to) {
+    conditions.push({ $and: [{ date: { $gte: dateRange.from } }, { date: { $lte: dateRange.to } }] });
+  } else if (dateRange?.from) {
+    conditions.push({ date: { $gte: dateRange.from } });
+  } else if (dateRange?.to) {
+    conditions.push({ date: { $lte: dateRange.to! } });
   }
-  if (dateRange.from) return { date: { $gte: dateRange.from } };
-  return { date: { $lte: dateRange.to! } };
+
+  if (type) {
+    conditions.push({ type: { $eq: type } });
+  }
+
+  if (conditions.length === 0) return undefined;
+  if (conditions.length === 1) return conditions[0];
+  return { $and: conditions };
 }
 
 function truncate(text: string, maxLen: number): string {

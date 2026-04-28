@@ -25,6 +25,12 @@ export const SearchMemoryInput = z.object({
         .describe("End date (YYYY-MM-DD)"),
     })
     .optional(),
+  type: z
+    .string()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe('Filter results by memory type (e.g. "code", "chat", "idea", "decision")'),
 });
 
 export type SearchMemoryInput = z.infer<typeof SearchMemoryInput>;
@@ -38,7 +44,8 @@ export async function searchMemory(
   const results = await chroma.search(
     embedding,
     input.n_results,
-    input.date_range
+    input.date_range,
+    input.type
   );
 
   return {
@@ -50,6 +57,7 @@ export async function searchMemory(
       filename: r.filename,
       excerpt: r.excerpt,
       similarity: Math.round(r.similarity * 1000) / 1000,
+      ...(r.type ? { type: r.type } : {}),
     })),
     total: results.length,
   };

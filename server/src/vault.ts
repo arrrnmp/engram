@@ -16,6 +16,7 @@ export interface EngramEntry {
   filename: string;
   title: string;
   path: string;
+  type?: string;
 }
 
 export class Vault {
@@ -72,15 +73,23 @@ export class Vault {
       const dirPath = join(this.root, date);
       if (!statSync(dirPath).isDirectory()) continue;
 
-      const files = readdirSync(dirPath).filter((f) => f.endsWith(".md"));
-      for (const filename of files) {
-        entries.push({
-          date,
-          filename,
-          title: slugToTitle(filename.replace(/\.md$/, "")),
-          path: join(dirPath, filename),
-        });
-      }
+    const files = readdirSync(dirPath).filter((f) => f.endsWith(".md"));
+    for (const filename of files) {
+      const entry: EngramEntry = {
+        date,
+        filename,
+        title: filename.replace(/\.md$/, ""), // fallback: raw filename
+        path: join(dirPath, filename),
+      };
+      try {
+        const raw = readFileSync(join(dirPath, filename), "utf-8");
+        const titleMatch = raw.match(/^---\n[\s\S]*?title:\s*"((?:[^"\\]|\\.)*)"/m);
+        if (titleMatch) entry.title = titleMatch[1].replace(/\\"/g, '"');
+        const typeMatch = raw.match(/^---\n[\s\S]*?type:\s*"([^"]+)"/m);
+        if (typeMatch) entry.type = typeMatch[1];
+      } catch {}
+      entries.push(entry);
+    }
     }
 
     return entries;
@@ -91,32 +100,28 @@ export class Vault {
   }
 }
 
+/** Convert a title to a safe filename (preserves spaces, case, and most symbols). */
 export function toSlug(title: string): string {
   return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
+    // Strip characters forbidden in filenames on macOS and Windows
+    .replace(/[/\\:*?"<>|]/g, "")
     .trim()
-    .replace(/[\s-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function slugToTitle(slug: string): string {
-  return slug
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+    // Collapse runs of whitespace to a single space
+    .replace(/\s+/g, " ");
 }
 
 export function formatEngram(
   title: string,
   date: string,
   content: string,
-  wikilinks: string[]
+  wikilinks: string[],
+  type?: string
 ): string {
+  const typeLine = type ? `\ntype: "${type}"` : "";
   const frontmatter = [
     "---",
     `title: "${title.replace(/"/g, '\\"')}"`,
-    `date: "${date}"`,
+    `date: "${date}"${typeLine}`,
     `tags: []`,
     "---",
     "",

@@ -13,6 +13,12 @@ export const SaveMemoryInput = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional()
     .describe("ISO date (YYYY-MM-DD). Defaults to today."),
+  type: z
+    .string()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe('Category of memory (e.g. "code", "chat", "idea", "decision"). Optional — omit for uncategorized.'),
 });
 
 export type SaveMemoryInput = z.infer<typeof SaveMemoryInput>;
@@ -36,7 +42,7 @@ export async function saveMemory(
     config.wikilinks.maxLinks
   );
 
-  vault.writeEngram(date, input.title, formatEngram(input.title, date, input.content, wikilinks));
+  vault.writeEngram(date, input.title, formatEngram(input.title, date, input.content, wikilinks, input.type));
 
   // Index in ChromaDB.
   await chroma.upsert(
@@ -47,6 +53,7 @@ export async function saveMemory(
       date,
       filename,
       vaultPath: vault.root,
+      type: input.type,
     },
     embedding
   );
@@ -55,7 +62,8 @@ export async function saveMemory(
     id,
     date,
     filename,
+    type: input.type,
     wikilinks,
-    message: `Engram saved: ${date}/${filename}${wikilinks.length > 0 ? ` (${wikilinks.length} related memories linked)` : ""}`,
+    message: `Engram saved: ${date}/${filename}${input.type ? ` (type: ${input.type})` : ""}${wikilinks.length > 0 ? ` (${wikilinks.length} related memories linked)` : ""}`,
   };
 }
