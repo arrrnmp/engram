@@ -245,6 +245,19 @@ function certsExist(): boolean {
 const HOME        = homedir();
 const SKILLS_SRC  = join(ROOT, "skills");
 
+/** Platform-aware path to Claude Desktop's MCP config file. */
+const CLAUDE_DESKTOP_CONFIG = (() => {
+  if (IS_WIN) {
+    const appData = process.env.APPDATA ?? join(HOME, "AppData", "Roaming");
+    return join(appData, "Claude", "claude_desktop_config.json");
+  }
+  if (IS_MAC) {
+    return join(HOME, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  }
+  // Linux
+  return join(HOME, ".config", "Claude", "claude_desktop_config.json");
+})();
+
 interface ToolDef {
   id: string;
   label: string;
@@ -263,6 +276,33 @@ const TOOLS: ToolDef[] = [
     skillsDir: join(HOME, ".claude", "skills"),
     // User-level MCP servers live in ~/.claude.json (top-level mcpServers key)
     mcpConfig: join(HOME, ".claude.json"),
+    upsertMcp(mcpUrl) {
+      const configPath = this.mcpConfig!;
+      mkdirSync(dirname(configPath), { recursive: true });
+      let existing: Record<string, unknown> = {};
+      if (existsSync(configPath)) {
+        try { existing = JSON.parse(readFileSync(configPath, "utf-8")); } catch {}
+      }
+      const servers = (existing.mcpServers as Record<string, unknown> | undefined) ?? {};
+      const current = (servers.engram as { url?: string } | undefined)?.url;
+      if (current === mcpUrl) return "unchanged";
+      const wasPresent = current !== undefined;
+      servers.engram = { type: "http", url: mcpUrl };
+      existing.mcpServers = servers;
+      writeFileSync(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+      return wasPresent ? "updated" : "added";
+    },
+  },
+  {
+    id: "claude-desktop",
+    label: "Claude Desktop",
+    // Detect by config dir presence (created on first launch) or app bundle on macOS.
+    installed: () =>
+      existsSync(dirname(CLAUDE_DESKTOP_CONFIG)) ||
+      (IS_MAC && existsSync("/Applications/Claude.app")),
+    // Claude Desktop is a chat app, not an agent CLI — no skills directory.
+    skillsDir: null,
+    mcpConfig: CLAUDE_DESKTOP_CONFIG,
     upsertMcp(mcpUrl) {
       const configPath = this.mcpConfig!;
       mkdirSync(dirname(configPath), { recursive: true });
