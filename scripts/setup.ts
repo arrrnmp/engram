@@ -582,9 +582,7 @@ async function main(): Promise<void> {
 
     if (models === null) {
       row(warn, `Ollama server not reachable at ${ollamaHost}`);
-      row(arrow, "Start Ollama and re-run, or start it now in a separate terminal:");
-      console.log(`      ${c.dim}ollama serve${c.reset}`);
-      issues.push("Start Ollama before running Engram: `ollama serve`");
+      row(arrow, `Engram will start Ollama automatically when the server launches`);
     } else {
       row(ok, `Ollama running at ${ollamaHost}`);
 
@@ -793,6 +791,43 @@ async function main(): Promise<void> {
 
     if (!toolOk) {
       issues.push(`Manually configure ${tool.label} — see README for MCP and skills paths`);
+    }
+  }
+
+  // ── 9. Skill packages (.skill files for Claude Desktop / Claude.ai) ──────────
+  section("Skill packages");
+
+  const DIST_DIR = join(ROOT, "dist");
+  mkdirSync(DIST_DIR, { recursive: true });
+
+  if (IS_WIN) {
+    row(warn, "Skill packaging requires the zip command — skipping on Windows");
+    row(arrow, `Manually zip each folder in ${SKILLS_SRC} and rename to .skill`);
+  } else {
+    const skillDirs = readdirSync(SKILLS_SRC).filter((s) =>
+      statSync(join(SKILLS_SRC, s)).isDirectory()
+    );
+
+    let packaged = 0;
+    for (const skill of skillDirs) {
+      const outFile = join(DIST_DIR, `${skill}.skill`);
+      // zip -r <outfile> <skill-folder> from inside skills/ so the archive
+      // root is the skill folder name — same structure as package_skill.py
+      const result = spawnSync("zip", ["-r", outFile, skill], {
+        cwd: SKILLS_SRC,
+        stdio: "pipe",
+      });
+      if (result.status === 0) {
+        row(ok, `${skill}.skill`);
+        packaged++;
+      } else {
+        row(fail, `Failed to package ${skill}`);
+      }
+    }
+
+    if (packaged > 0) {
+      row(arrow, `Skill files written to: ${c.bold}${DIST_DIR}${c.reset}`);
+      row(arrow, `Double-click a ${c.bold}.skill${c.reset} file to install it in Claude Desktop or Claude.ai`);
     }
   }
 
