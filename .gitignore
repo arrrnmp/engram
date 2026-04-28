@@ -9,3 +9,4 @@ config.local.json
 certs/
 logs/
 dist/
+.DS_Store
