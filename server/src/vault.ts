@@ -12,6 +12,7 @@ import { homedir } from "os";
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface EngramEntry {
+  id?: string;
   date: string;
   filename: string;
   title: string;
@@ -83,10 +84,10 @@ export class Vault {
       };
       try {
         const raw = readFileSync(join(dirPath, filename), "utf-8");
-        const titleMatch = raw.match(/^---\n[\s\S]*?title:\s*"((?:[^"\\]|\\.)*)"/m);
-        if (titleMatch) entry.title = titleMatch[1].replace(/\\"/g, '"');
-        const typeMatch = raw.match(/^---\n[\s\S]*?type:\s*"([^"]+)"/m);
-        if (typeMatch) entry.type = typeMatch[1];
+        const parsed = parseEngram(raw);
+        if (parsed.id) entry.id = parsed.id;
+        if (parsed.title) entry.title = parsed.title;
+        if (parsed.type) entry.type = parsed.type;
       } catch {}
       entries.push(entry);
     }
@@ -95,9 +96,6 @@ export class Vault {
     return entries;
   }
 
-  engramId(date: string, filename: string): string {
-    return `${date}/${filename.replace(/\.md$/, "")}`;
-  }
 }
 
 /** Convert a title to a safe filename (preserves spaces, case, and most symbols). */
@@ -111,6 +109,7 @@ export function toSlug(title: string): string {
 }
 
 export function formatEngram(
+  id: string,
   title: string,
   date: string,
   content: string,
@@ -120,6 +119,7 @@ export function formatEngram(
   const typeLine = type ? `\ntype: "${type}"` : "";
   const frontmatter = [
     "---",
+    `id: "${id}"`,
     `title: "${title.replace(/"/g, '\\"')}"`,
     `date: "${date}"${typeLine}`,
     `tags: []`,
@@ -135,6 +135,33 @@ export function formatEngram(
       : "";
 
   return `${frontmatter}${body}${linksSection}\n`;
+}
+
+export interface ParsedEngram {
+  id?: string;
+  title?: string;
+  date?: string;
+  type?: string;
+  body: string;
+}
+
+export function parseEngram(raw: string): ParsedEngram {
+  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fmMatch) return { body: raw.trim() };
+
+  const fm = fmMatch[1];
+  const rest = fmMatch[2];
+
+  const relIdx = rest.indexOf("\n\n## Related Memories");
+  const body = (relIdx >= 0 ? rest.slice(0, relIdx) : rest).trim();
+
+  return {
+    id: fm.match(/^id:\s*"([^"]+)"/m)?.[1],
+    title: fm.match(/^title:\s*"((?:[^"\\]|\\.)*)"/m)?.[1]?.replace(/\\"/g, '"'),
+    date: fm.match(/^date:\s*"([^"]+)"/m)?.[1],
+    type: fm.match(/^type:\s*"([^"]+)"/m)?.[1],
+    body,
+  };
 }
 
 export function updateEngramWikilinks(

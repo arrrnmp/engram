@@ -4,7 +4,8 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { EngramChroma } from "./chroma.js";
 import { createEmbeddingProvider } from "./embeddings/index.js";
-import { Vault } from "./vault.js";
+import { Vault, parseEngram } from "./vault.js";
+import { VaultIndex } from "./vault-index.js";
 import { saveMemory, SaveMemoryInput } from "./tools/save-memory.js";
 import { searchMemory, SearchMemoryInput } from "./tools/search-memory.js";
 import { getImportantContext, updateImportantContext, UpdateContextInput } from "./tools/context.js";
@@ -17,6 +18,7 @@ import { logger } from "./logger.js";
 const config = loadConfig();
 const vault = new Vault(config.vault.path);
 const chroma = new EngramChroma(config);
+const vaultIndex = new VaultIndex();
 
 // ── Ollama lifecycle ──────────────────────────────────────────────────────────
 
@@ -73,6 +75,37 @@ logger.info(`[engram] Embedder ready: ${embedder.modelInfo().provider} / ${embed
 logger.info("[engram] Connecting to ChromaDB...");
 await chroma.init();
 logger.info("[engram] ChromaDB ready.");
+
+// ── Vault index + startup re-index ────────────────────────────────────────────
+
+logger.info("[engram] Building vault index...");
+vaultIndex.build(vault.root);
+logger.info(`[engram] Vault index: ${vaultIndex.size()} engrams indexed.`);
+
+{
+  const chromaIds = new Set(await chroma.getAllIds());
+  const entries = vault.listEngrams();
+  const missing = entries.filter((e) => e.id && !chromaIds.has(e.id));
+
+  if (missing.length > 0) {
+    logger.info(`[engram] Re-indexing ${missing.length} engram(s) missing from ChromaDB...`);
+    for (const e of missing) {
+      try {
+        const raw = vault.readEngram(e.date, e.filename);
+        const { body } = parseEngram(raw);
+        const embedding = await embedder.embed(body);
+        await chroma.upsert(
+          { id: e.id!, content: body, title: e.title, date: e.date, filename: e.filename, vaultPath: vault.root, type: e.type },
+          embedding
+        );
+        logger.info(`[engram] Re-indexed: ${e.filename} [${e.id}]`);
+      } catch (err) {
+        logger.error(`[engram] Failed to re-index ${e.filename}`, { err });
+      }
+    }
+    logger.info("[engram] Re-index complete.");
+  }
+}
 
 // ── Session management ────────────────────────────────────────────────────────
 //
@@ -190,13 +223,13 @@ function createSession(): Session {
   // ── Tool: read_engram ───────────────────────────────────────────────────────
   server.tool(
     "read_engram",
-    "Read the full content of a specific Engram by its ID (YYYY-MM-DD/slug). Use after list_engrams or search_memory to fetch the complete text.",
+    "Read the full content of a specific Engram by its UUID (as returned by list_engrams or search_memory).",
     ReadEngramInput.shape,
     async (input) => {
       const { id } = input as z.infer<typeof ReadEngramInput>;
       logger.info(`[tool] read_engram: ${id}`);
       try {
-        const result = readEngram(input as z.infer<typeof ReadEngramInput>, vault);
+        const result = await readEngram(input as z.infer<typeof ReadEngramInput>, vaultIndex, vault, chroma);
         logger.info(`[tool] read_engram: ${result.content.length} chars`);
         return { content: [{ type: "text", text: result.content }] };
       } catch (err) {

@@ -25,7 +25,7 @@ export function listEngrams(input: ListEngramsInput, vault: Vault) {
 
   return {
     engrams: limited.map((e) => ({
-      id: vault.engramId(e.date, e.filename),
+      ...(e.id ? { id: e.id } : {}),
       date: e.date,
       filename: e.filename,
       title: e.title,

@@ -111,6 +111,11 @@ export class EngramChroma {
   async delete(id: string): Promise<void> {
     await this.col.delete({ ids: [id] });
   }
+
+  async getAllIds(): Promise<string[]> {
+    const result = await this.col.get({ include: [] as any });
+    return result.ids ?? [];
+  }
 }
 
 function buildWhere(

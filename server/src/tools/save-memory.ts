@@ -30,19 +30,20 @@ export async function saveMemory(
   embedder: EmbeddingProvider,
   config: Config
 ) {
+  const id = crypto.randomUUID();
   const date = input.date ?? new Date().toISOString().slice(0, 10);
   const filename = `${toSlug(input.title)}.md`;
-  const id = vault.engramId(date, filename);
+  const wikiPath = `${date}/${toSlug(input.title)}`;
 
   // Embed once — reused for wikilink search and ChromaDB indexing.
   const embedding = await embedder.embed(input.content);
   const wikilinks = await generateAndApplyWikilinks(
-    id, embedding, vault, chroma,
+    id, wikiPath, embedding, vault, chroma,
     config.wikilinks.threshold,
     config.wikilinks.maxLinks
   );
 
-  vault.writeEngram(date, input.title, formatEngram(input.title, date, input.content, wikilinks, input.type));
+  vault.writeEngram(date, input.title, formatEngram(id, input.title, date, input.content, wikilinks, input.type));
 
   // Index in ChromaDB.
   await chroma.upsert(
@@ -64,6 +65,6 @@ export async function saveMemory(
     filename,
     type: input.type,
     wikilinks,
-    message: `Engram saved: ${date}/${filename}${input.type ? ` (type: ${input.type})` : ""}${wikilinks.length > 0 ? ` (${wikilinks.length} related memories linked)` : ""}`,
+    message: `Engram saved: ${filename} [${id}]${input.type ? ` (type: ${input.type})` : ""}${wikilinks.length > 0 ? ` (${wikilinks.length} related memories linked)` : ""}`,
   };
 }
