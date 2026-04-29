@@ -1,6 +1,6 @@
 ---
 name: dilucidate
-description: Weekly memory graph analysis. Links related memories, flags contradictions, compresses clusters into summaries, backfills tags, and surfaces decaying memories. Run when the user invokes /dilucidate.
+description: Weekly memory graph analysis. Links related memories, flags contradictions, writes synthesis engrams for clusters, backfills tags, and surfaces decaying memories. Run when the user invokes /dilucidate.
 disable-model-invocation: true
 user-invocable: true
 effort: high
@@ -48,11 +48,11 @@ For each cluster with 3+ engrams:
 
 Note: a summary engram cannot contradict its own source engrams — skip those.
 
-### Step 4 — Summarization candidates
+### Step 4 — Synthesis candidates
 
-Clusters with 5+ engrams are candidates for summarization. For each:
+Clusters with 5+ engrams are candidates for a synthesis engram. For each:
 1. Read all engrams in the cluster
-2. Prepare a digest that captures the evolving thread — key decisions, changes of direction, current state
+2. Identify what emerges from reading them *together* — cross-cutting patterns, the overall picture, how the pieces relate to each other — that is not visible from any single engram alone. Do not compress or replace the source engrams. The synthesis adds a new layer of understanding on top of them; all detail remains in the originals.
 
 ### Step 5 — Tag audit
 
@@ -84,38 +84,39 @@ These are informational only — never auto-delete.
 
 ### Step 7 — Present report and wait for approval
 
-Present the report in this format:
+Present the report as plain text in this structure:
 
-```
-╭─ Dilucidation Report ─ YYYY-MM-DD ──────────────────────────╮
-│                                                              │
-│ New memories since last run: N                               │
-│                                                              │
-│ CLUSTERS (N found)                                           │
-│ ├─ "Theme" — N engrams, N missing links                      │
-│ └─ "Theme" — N engrams, summary candidate                    │
-│                                                              │
-│ CONTRADICTIONS (N found)                                     │
-│ └─ "Summary" (date A) ↔ (date B)                            │
-│                                                              │
-│ SUMMARIES (N candidates)                                     │
-│ └─ "Theme" cluster → N engrams → 1 summary                  │
-│                                                              │
-│ TAGS (N engrams with empty tags)                             │
-│                                                              │
-│ DECAY                                                        │
-│ ├─ N orphans (>30d, 0 links): "title", ...                   │
-│ └─ N stale engrams                                           │
-│                                                              │
-│ PROPOSED ACTIONS                                             │
-│ 1. Create N wikilinks across N clusters                      │
-│ 2. Save N contradiction engrams                              │
-│ 3. Save N summary engrams                                    │
-│ 4. Backfill tags for N engrams                               │
-│                                                              │
-│ Proceed? [y / n / specify which steps to skip]              │
-╰──────────────────────────────────────────────────────────────╯
-```
+---
+**Dilucidation Report — YYYY-MM-DD**
+
+New memories since last run: N
+
+**Clusters (N found)**
+- "Theme" — N engrams, N missing links
+- "Theme" — N engrams, synthesis candidate
+
+**Contradictions (N found)**
+- "Summary" (date A) ↔ (date B)
+
+**Synthesis candidates (N)**
+- "Theme" cluster — N engrams
+
+**Tags (N engrams with empty tags)**
+- Title → proposed, tags
+
+**Decay**
+- N orphans (>30d, 0 links): "title", ...
+- N stale engrams
+
+**Proposed actions**
+1. Create N wikilinks across N clusters
+2. Save N contradiction engrams
+3. Save N synthesis engrams
+4. Backfill tags for N engrams
+
+Proceed? [y / n / specify which steps to skip]
+
+---
 
 **Wait for explicit user approval before proceeding to Phase 2.**
 
@@ -150,12 +151,12 @@ These positions conflict. One needs to be resolved or superseded.
 
 The wikilink engine will automatically link back to both referenced engrams.
 
-### Step 10 — Save summary engrams
+### Step 10 — Save synthesis engrams
 
-For each summarization candidate, call `save_memory` with:
+For each synthesis candidate, call `save_memory` with:
 - `type: "summary"`
-- `title`: cluster theme + " — Summary" (e.g. "Psychological Architecture — Summary")
-- `content`: the digest prepared in Step 4, written in English, third person
+- `title`: cluster theme + " — Synthesis" (e.g. "Psychological Architecture — Synthesis")
+- `content`: the synthesis prepared in Step 4 — the cross-cutting patterns and overall picture that emerge from reading the cluster together. Written in English, third person. Link to each source engram using `[[date/filename]]` so readers can navigate to the full detail. Do not try to compress or replace the source engrams — they remain the authoritative record.
 
 ### Step 11 — Backfill tags
 
@@ -183,11 +184,9 @@ Build the updated meta JSON and call `update_dilucidate_meta`:
 
 ### Step 13 — Print final summary
 
-```
 Dilucidation complete:
 - N wikilinks created
 - N contradictions saved
-- N summaries written
+- N synthesis engrams written
 - N engrams tagged
 - N orphans flagged (not deleted — review manually)
-```
