@@ -16,7 +16,7 @@ You have been explicitly asked to rebuild the user's persistent memory profile f
 
 ## Purpose
 
-IMPORTANT.md is a concise, evergreen profile of the user. It is loaded at the start of every session via /prefill. It should capture durable facts — not a log of past conversations.
+IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of every session via /prefill. It should capture durable facts — not a log of past conversations. Length should match the amount of relevant information: if Aaron has a lot of important context across many domains, the file should reflect that fully. Do not trim detail to hit a word target.
 
 ## Steps
 
@@ -31,19 +31,21 @@ IMPORTANT.md is a concise, evergreen profile of the user. It is loaded at the st
    - `"personal background and role"`
    - `"important decisions and constraints"`
 
-4. **Read the full content** of the top results using `read_engram` (pass the `id` from search results). Excerpts from `search_memory` are truncated — reading in full ensures you don't miss important context. Prioritise the most recent and highest-similarity results; you don't need to read every engram.
+4. **Read the full content** of all engrams using `read_engram`. Excerpts from `search_memory` are truncated — full reads are required to avoid losing detail. Do not skip engrams; the current IMPORTANT.md may contain facts (hardware, homelab, projects, relationships) that came from engrams not surfaced by the theme searches.
 
-   See [references/strategy.md](references/strategy.md) for guidance on what to include.
+5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user ("Aaron prefers…", "Aaron is working on…", never "You prefer…").
 
-4. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user ("Aaron prefers…", "Aaron is working on…", never "You prefer…"). Keep it under 400 words. Focus on what a future AI assistant genuinely needs to know to be useful to this user.
+   **Preserve everything that matters.** The existing IMPORTANT.md is the baseline — treat every fact in it as worth keeping unless a newer engram explicitly contradicts or supersedes it. New engrams add to the profile; they do not replace it. Length is determined by the content, not a word limit. A richer profile is better than a shorter one.
 
-5. **Call `update_important_context`** with the synthesized content.
+6. **Call `update_important_context`** with the synthesized content.
 
-6. **Confirm** to the user: tell them what changed at a high level (e.g., "Updated to reflect your new role and the Engram project"). Mention how many engrams were reviewed.
+7. **Confirm** to the user: tell them what changed at a high level (e.g., "Updated to reflect your new role and the Engram project"). Mention how many engrams were reviewed.
 
 ## Rules
 
 - Do not pad with generic filler. Every sentence should be something a future session could act on.
+- The existing IMPORTANT.md is additive input, not a draft to shorten. Preserve all facts it contains unless directly contradicted by newer engrams.
 - Prefer the most recent information when facts conflict across Engrams.
 - Do not include ephemeral details (what you discussed today, specific error messages, etc.).
 - Keep it stable: the profile should change slowly over months, not session to session.
+- Never truncate for length. If the profile is long because Aaron's context is rich, that is correct behaviour.
