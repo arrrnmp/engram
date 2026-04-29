@@ -31,6 +31,8 @@ If `meta` is null, this is the first run — proceed regardless.
 
 ### Step 2 — Semantic clustering
 
+Call `list_engrams` (no filters) — keep this result; it is reused in Steps 5 and 6 without calling it again. Note the `abstract` field on each entry.
+
 Call `cluster_memories` with:
 - `threshold: 0.72` (default)
 - `minSize: 3`
@@ -56,13 +58,13 @@ Clusters with 5+ engrams are candidates for a synthesis engram. For each:
 
 ### Step 5 — Tag audit
 
-Call `list_engrams`. For each engram where `tags` is absent or `[]`:
-1. Call `read_engram` to get the content
-2. Propose 2–4 relevant tags based on the content (e.g. `"psychology"`, `"career"`, `"relationships"`)
+The `list_engrams` result from Step 2 is already available. For each engram where `tags` is absent or `[]`:
+1. Check the `abstract` field — if it is present and detailed enough, propose 2–4 relevant tags directly from the abstract (e.g. `"psychology"`, `"career"`, `"relationships"`) without calling `read_engram`
+2. Only call `read_engram` if the abstract is absent or too sparse to determine good tags
 
 ### Step 6 — Decay scoring
 
-For each engram from `list_engrams`:
+For each engram from the `list_engrams` result in Step 2:
 
 ```
 daysSinceDate = days between engram date and today

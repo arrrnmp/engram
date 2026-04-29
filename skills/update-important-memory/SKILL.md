@@ -20,18 +20,25 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
 
 ## Steps
 
-1. **List all Engrams** by calling `list_engrams` (no filters). Note the total count and date range.
+1. **List all Engrams** by calling `list_engrams` (no filters). Note the total count, date range, and the `abstract` field on each entry.
 
 2. **Read the current IMPORTANT.md** via `get_important_context`. Keep it in mind as a baseline.
 
-3. **Search for key themes** by calling `search_memory` with several targeted queries to surface the most relevant engrams. Run multiple searches covering different aspects:
+3. **Identify high-value engrams** from the list. Use each engram's `abstract` (returned by `list_engrams`) as a first-pass filter — read the abstract carefully and decide whether the full body is needed. Call `read_engram` for any engram where:
+   - The abstract is absent (older engrams may not have one)
+   - The abstract suggests content that goes beyond what IMPORTANT.md already captures
+   - The abstract is ambiguous about details that matter for the profile
+
+   You do **not** need to call `read_engram` for engrams whose abstract clearly shows they are already fully represented in the existing IMPORTANT.md (e.g. a synthesis engram whose themes are already captured).
+
+4. **Search for key themes** by calling `search_memory` with several targeted queries to catch anything the abstract pass may have missed:
    - `"user preferences and working style"`
    - `"technical stack and tools"`
    - `"ongoing projects and goals"`
    - `"personal background and role"`
    - `"important decisions and constraints"`
 
-4. **Read every engram in full.** For each `id` returned by `list_engrams` in step 1, call `read_engram`. Use the list from step 1 as the source — not the search results from step 3, which are a subset. Do not skip any engram. Facts about hardware, homelabs, projects, relationships, and preferences often live in engrams that don't score highly on theme searches but are still essential to the profile.
+   Call `read_engram` for any result not already read in step 3.
 
 5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user. Use whatever name or pronoun the user goes by (e.g. "Alex prefers…", "They are working on…"), never "You prefer…".
 
@@ -39,7 +46,7 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
 
 6. **Call `update_important_context`** with the synthesized content.
 
-7. **Confirm** to the user: tell them what changed at a high level (e.g., "Updated to reflect your new role and the Engram project"). Mention how many engrams were reviewed.
+7. **Confirm** to the user: tell them what changed at a high level (e.g., "Updated to reflect your new role and the Engram project"). Mention how many engrams were reviewed (full reads) vs. scanned by abstract only.
 
 ## Rules
 
