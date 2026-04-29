@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EngramChroma } from "../chroma.js";
 import type { EmbeddingProvider } from "../embeddings/types.js";
+import type { LRUEmbeddingCache } from "../embeddings/cache.js";
 
 export const SearchMemoryInput = z.object({
   query: z.string().min(1).describe("Natural language search query"),
@@ -38,9 +39,12 @@ export type SearchMemoryInput = z.infer<typeof SearchMemoryInput>;
 export async function searchMemory(
   input: SearchMemoryInput,
   chroma: EngramChroma,
-  embedder: EmbeddingProvider
+  embedder: EmbeddingProvider,
+  queryCache?: LRUEmbeddingCache
 ) {
-  const embedding = await embedder.embed(input.query);
+  const cached = queryCache?.get(input.query);
+  const embedding = cached ?? await embedder.embed(input.query);
+  if (!cached && queryCache) queryCache.set(input.query, embedding);
   const results = await chroma.search(
     embedding,
     input.n_results,

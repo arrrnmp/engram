@@ -1,4 +1,5 @@
 import { z } from "zod";
+import matter from "gray-matter";
 import type { EngramChroma } from "../chroma.js";
 import type { EmbeddingProvider } from "../embeddings/types.js";
 import type { Vault } from "../vault.js";
@@ -29,6 +30,14 @@ export const UpdateEngramInput = z.object({
 
 export type UpdateEngramInput = z.infer<typeof UpdateEngramInput>;
 
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function tagsArray(data: Record<string, unknown>): string[] {
+  return Array.isArray(data.tags) ? data.tags.map(String) : [];
+}
+
 export async function updateEngram(
   input: UpdateEngramInput,
   vault: Vault,
@@ -47,46 +56,55 @@ export async function updateEngram(
 
   // ── setAbstract ────────────────────────────────────────────────────────────
   if (input.setAbstract) {
-    const escaped = input.setAbstract.replace(/\n/g, " ").replace(/"/g, '\\"').trim();
-    if (/^abstract:\s*".*"$/m.test(content)) {
-      content = content.replace(/^abstract:\s*".*"$/m, `abstract: "${escaped}"`);
-    } else {
-      // No abstract line yet — insert after the id line.
-      content = content.replace(/^(id:\s*"[^"]+")$/m, `$1\nabstract: "${escaped}"`);
-    }
-    // Keep ChromaDB metadata in sync — no re-embedding needed.
+    const parsed = matter(content);
+    const escaped = input.setAbstract.replace(/\n/g, " ").trim();
+    parsed.data.abstract = escaped;
+
+    const wikilinks = extractWikilinks(content);
+    const tags = tagsArray(parsed.data as Record<string, unknown>);
+    content = formatEngram(
+      stringField(parsed.data.id) ?? input.id,
+      escaped,
+      stringField(parsed.data.title) ?? "",
+      stringField(parsed.data.date) ?? new Date().toISOString().slice(0, 10),
+      parsed.content.trim(),
+      wikilinks,
+      stringField(parsed.data.type),
+      tags
+    );
+
     await chroma.patchMetadata(input.id, { abstract: escaped });
     abstractSet = true;
   }
 
   // ── setContent ─────────────────────────────────────────────────────────────
   if (input.setContent) {
-    const parsed = parseEngram(content);
+    const parsed = matter(content);
     const existingWikilinks = extractWikilinks(content);
+    const tags = tagsArray(parsed.data as Record<string, unknown>);
 
-    // Rebuild the file with the new body, preserving all frontmatter and wikilinks.
     content = formatEngram(
       input.id,
-      parsed.abstract ?? "",
-      parsed.title ?? "",
-      parsed.date ?? new Date().toISOString().slice(0, 10),
+      stringField(parsed.data.abstract) ?? "",
+      stringField(parsed.data.title) ?? "",
+      stringField(parsed.data.date) ?? new Date().toISOString().slice(0, 10),
       input.setContent,
       existingWikilinks,
-      parsed.type
+      stringField(parsed.data.type),
+      tags
     );
 
-    // Re-embed the new content and upsert to ChromaDB.
     const newEmbedding = await embedder.embed(input.setContent);
     await chroma.upsert(
       {
         id: input.id,
         content: input.setContent,
-        title: parsed.title ?? "",
-        date: parsed.date ?? "",
+        title: stringField(parsed.data.title) ?? "",
+        date: stringField(parsed.data.date) ?? "",
         filename: location.filename,
         vaultPath: vault.root,
-        abstract: parsed.abstract,
-        type: parsed.type,
+        abstract: stringField(parsed.data.abstract),
+        type: stringField(parsed.data.type),
       },
       newEmbedding
     );
@@ -95,14 +113,20 @@ export async function updateEngram(
 
   // ── addTags ────────────────────────────────────────────────────────────────
   if (input.addTags && input.addTags.length > 0) {
-    const match = content.match(/^tags:\s*\[(.*?)\]/m);
-    const existing = match?.[1]
-      ? match[1].split(",").map((t) => t.trim().replace(/^"|"$/g, "")).filter(Boolean)
-      : [];
+    const parsed = matter(content);
+    const existing = tagsArray(parsed.data as Record<string, unknown>);
     const merged = Array.from(new Set([...existing, ...input.addTags]));
-    content = content.replace(
-      /^tags:\s*\[.*?\]/m,
-      `tags: [${merged.map((t) => `"${t}"`).join(", ")}]`
+
+    const wikilinks = extractWikilinks(content);
+    content = formatEngram(
+      stringField(parsed.data.id) ?? input.id,
+      stringField(parsed.data.abstract) ?? "",
+      stringField(parsed.data.title) ?? "",
+      stringField(parsed.data.date) ?? new Date().toISOString().slice(0, 10),
+      parsed.content.trim(),
+      wikilinks,
+      stringField(parsed.data.type),
+      merged
     );
     tagsAdded = merged.length - existing.length;
   }

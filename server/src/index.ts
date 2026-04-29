@@ -4,6 +4,7 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { EngramChroma } from "./chroma.js";
 import { createEmbeddingProvider } from "./embeddings/index.js";
+import { LRUEmbeddingCache } from "./embeddings/cache.js";
 import { Vault, parseEngram } from "./vault.js";
 import { VaultIndex } from "./vault-index.js";
 import { saveMemory, SaveMemoryInput } from "./tools/save-memory.js";
@@ -75,6 +76,8 @@ if (config.embedding.provider !== "openai") {
 logger.info("[engram] Loading embedding provider...");
 const embedder = await createEmbeddingProvider(config);
 logger.info(`[engram] Embedder ready: ${embedder.modelInfo().provider} / ${embedder.modelInfo().model}`);
+
+const queryCache = new LRUEmbeddingCache(config.embedding.queryCacheSize);
 
 logger.info("[engram] Connecting to ChromaDB...");
 await chroma.init();
@@ -158,7 +161,7 @@ function createSession(): Session {
       const { query, n_results } = input as z.infer<typeof SearchMemoryInput>;
       logger.info(`[tool] search_memory: "${query}" (n=${n_results ?? 5})`);
       try {
-        const result = await searchMemory(input as z.infer<typeof SearchMemoryInput>, chroma, embedder);
+        const result = await searchMemory(input as z.infer<typeof SearchMemoryInput>, chroma, embedder, queryCache);
         logger.info(`[tool] search_memory: ${result.results.length} results`);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       } catch (err) {

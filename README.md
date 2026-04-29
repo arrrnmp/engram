@@ -57,9 +57,15 @@ The script checks every prerequisite, detects your hardware, recommends the righ
 ### 3. Start
 
 ```bash
-bun run start        # cross-platform
+bun run start        # cross-platform (macOS, Linux, Windows)
 # or
-./scripts/start.sh   # macOS / Linux
+./scripts/start.sh   # macOS / Linux (direct shell invocation)
+```
+
+Run the test suite with:
+
+```bash
+cd server && bun test
 ```
 
 ### Manual configuration
@@ -124,10 +130,11 @@ The server exposes these tools directly (used by skills internally):
 | Tool | Description |
 |---|---|
 | `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, and `content`. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
-| `search_memory` | Semantic search across all Engrams. Filterable by date range and type |
-| `list_engrams` | List Engrams, filterable by date range. Returns UUID, title, abstract, date, filename, type — without reading full file bodies |
+| `search_memory` | Semantic search across all Engrams. Returns `abstract` on each result. Filterable by date range and type |
+| `list_engrams` | List Engrams, filterable by date range. Supports `limit` and `offset` for pagination. Returns UUID, title, abstract, date, filename, type — without reading full file bodies |
 | `read_engram` | Read the full content of a specific Engram by UUID |
-| `update_engram` | Update an existing Engram in-place without re-embedding: set abstract (`setAbstract`), add tags (`addTags`), add wikilinks (`addWikilinks`) |
+| `update_engram` | Update an existing Engram in-place: `setAbstract` (synced to ChromaDB), `setContent` (replaces body and re-embeds), `addTags`, `addWikilinks` |
+| `delete_engram` | Permanently delete an Engram — removes the vault file, ChromaDB entry, and index entry. Cannot be undone |
 | `cluster_memories` | Compute semantic clusters across all Engrams — returns groups, avg similarity, and missing wikilinks within each cluster. Used by `/dilucidate` |
 | `get_important_context` | Read IMPORTANT.md |
 | `update_important_context` | Write IMPORTANT.md |

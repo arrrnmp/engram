@@ -13,9 +13,10 @@ bun scripts/setup.ts      # Interactive onboarding — checks prerequisites, det
 bun run start              # Starts ChromaDB + Engram server (cross-platform)
 ./scripts/start.sh         # Same, macOS/Linux only
 cd server && bun run dev   # Dev server with --watch
+cd server && bun test      # Run test suite
 ```
 
-There are no tests in this project. There is no lint or typecheck command configured.
+There is no lint or typecheck command configured.
 
 ## Architecture
 
@@ -40,21 +41,22 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 | Module | Purpose |
 |---|---|
 | `config.ts` | Zod-validated config loading from `config.json` / `config.local.json` |
-| `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`) |
+| `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. |
 | `vault-index.ts` | `VaultIndex` — scans vault frontmatter at startup to build a UUID→filepath map; `resolveWithFallback` handles mid-session renames and deletes stale ChromaDB entries for missing files |
 | `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings` |
 | `wikilinks.ts` | Bidirectional `[[wikilinks]]` between semantically similar engrams. Takes `chromaId` (UUID, for self-exclusion) and `wikiPath` (date/filename, for link text) as separate params |
 | `embeddings/index.ts` | Provider factory — `createEmbeddingProvider()` dispatches to Ollama, NVIDIA vLLM, or OpenAI based on config + hardware |
+| `embeddings/cache.ts` | `LRUEmbeddingCache` — in-process LRU cache for query embeddings. Used by `search_memory` to skip re-embedding repeated queries. Size configurable via `embedding.queryCacheSize` |
 | `embeddings/ollama.ts` | Ollama `/api/embed` client |
 | `embeddings/openai-compat.ts` | OpenAI `/v1/embeddings` client (also used for NVIDIA vLLM) |
 | `hardware/detect.ts` | Detects Apple Silicon, NVIDIA (Blackwell vs older), or CPU |
 | `hardware/memory.ts` | Steps through model variants (8B→4B, q8→q4) to fit available memory |
 | `dilucidate/cluster.ts` | Core clustering algorithm — pairwise cosine similarity, connected-components BFS, missing wikilink detection |
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram, upserts to ChromaDB |
-| `tools/search-memory.ts` | Semantic search with optional date/type filter |
+| `tools/search-memory.ts` | Semantic search with optional date/type filter. Accepts optional `LRUEmbeddingCache` to skip re-embedding repeated queries |
 | `tools/read-engram.ts` | Resolves UUID via VaultIndex, reads file |
 | `tools/list-engrams.ts` | Lists engrams from vault with frontmatter-parsed titles, IDs, and abstracts — no file body reads |
-| `tools/update-engram.ts` | Updates an existing engram in-place (no re-embedding): `setAbstract`, `addTags`, `addWikilinks` |
+| `tools/update-engram.ts` | Updates an existing engram in-place: `setAbstract`, `addTags`, `setContent` (re-embeds), `addWikilinks`. Uses `gray-matter` for parse→mutate→reformat via `formatEngram` |
 | `tools/context.ts` | Read/write IMPORTANT.md |
 | `tools/dilucidate/cluster.ts` | `cluster_memories` MCP tool — wraps the clustering algorithm |
 | `tools/dilucidate-meta.ts` | Read/write `.dilucidate-meta.json` for `/dilucidate` run state |
@@ -98,3 +100,15 @@ All skill output — engram content, IMPORTANT.md, search queries — is enforce
 ## Runtime: Bun, not Node
 
 This project uses Bun exclusively. Use Bun APIs directly (`Bun.spawn`, `Bun.file`, `Bun.serve`, `import.meta.dir`). The tsconfig targets ESNext with `bun-types`.
+
+## Testing
+
+Tests use Bun's built-in test runner (`bun:test`) — no additional framework. Run `cd server && bun test`.
+
+- **`server/src/__tests__/helpers/mocks.ts`** — mock factories for `EmbeddingProvider`, `EngramChroma`, `Vault`, `VaultIndex`. Tool handler tests pass these as deps via the existing DI pattern.
+- **`server/src/__tests__/fixtures/`** — sample engram markdown files for parsing tests.
+- Test files are co-located in `server/src/__tests__/` — one file per module under test.
+
+**What to test:** Pure functions (`vault.ts` parsing/formatting, `cache.ts`, `cluster.ts` math, `memory.ts` model selection), tool handlers with mocked deps, config schema validation, edge cases.
+
+**What not to test:** `index.ts` (wiring), embedding provider HTTP clients (`ollama.ts`, `openai-compat.ts`), `hardware/detect.ts` (platform-specific). These are thin wrappers where unit tests add no confidence.

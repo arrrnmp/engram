@@ -8,6 +8,7 @@ import {
 } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
+import matter from "gray-matter";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -117,18 +118,22 @@ export function formatEngram(
   date: string,
   content: string,
   wikilinks: string[],
-  type?: string
+  type?: string,
+  tags: string[] = []
 ): string {
   const typeLine = type ? `\ntype: "${type}"` : "";
   // Normalize abstract to a single line for clean frontmatter storage.
   const abstractEscaped = abstract.replace(/\n/g, " ").replace(/"/g, '\\"').trim();
+  const tagsLine = tags.length > 0
+    ? `tags: [${tags.map((t) => `"${t}"`).join(", ")}]`
+    : `tags: []`;
   const frontmatter = [
     "---",
     `id: "${id}"`,
     `abstract: "${abstractEscaped}"`,
     `title: "${title.replace(/"/g, '\\"')}"`,
     `date: "${date}"${typeLine}`,
-    `tags: []`,
+    tagsLine,
     "---",
     "",
   ].join("\n");
@@ -153,21 +158,26 @@ export interface ParsedEngram {
 }
 
 export function parseEngram(raw: string): ParsedEngram {
-  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!fmMatch) return { body: raw.trim() };
+  let data: Record<string, unknown>;
+  let content: string;
 
-  const fm = fmMatch[1];
-  const rest = fmMatch[2];
+  try {
+    const parsed = matter(raw);
+    data = parsed.data as Record<string, unknown>;
+    content = parsed.content;
+  } catch {
+    return { body: raw.trim() };
+  }
 
-  const relIdx = rest.indexOf("\n\n## Related Memories");
-  const body = (relIdx >= 0 ? rest.slice(0, relIdx) : rest).trim();
+  const relIdx = content.indexOf("\n\n## Related Memories");
+  const body = (relIdx >= 0 ? content.slice(0, relIdx) : content).trim();
 
   return {
-    id: fm.match(/^id:\s*"([^"]+)"/m)?.[1],
-    abstract: fm.match(/^abstract:\s*"((?:[^"\\]|\\.)*)"/m)?.[1]?.replace(/\\"/g, '"'),
-    title: fm.match(/^title:\s*"((?:[^"\\]|\\.)*)"/m)?.[1]?.replace(/\\"/g, '"'),
-    date: fm.match(/^date:\s*"([^"]+)"/m)?.[1],
-    type: fm.match(/^type:\s*"([^"]+)"/m)?.[1],
+    id: typeof data.id === "string" ? data.id : undefined,
+    abstract: typeof data.abstract === "string" ? data.abstract : undefined,
+    title: typeof data.title === "string" ? data.title : undefined,
+    date: typeof data.date === "string" ? data.date : (data.date instanceof Date ? data.date.toISOString().slice(0, 10) : undefined),
+    type: typeof data.type === "string" ? data.type : undefined,
     body,
   };
 }

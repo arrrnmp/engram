@@ -10,6 +10,7 @@
     "@chroma-core/default-embed": "^0.1.9",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chromadb": "^3.4.3",
+    "gray-matter": "^4.0.3",
     "winston": "^3.19.0",
     "zod": "^3.23.0"
   },

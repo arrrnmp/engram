@@ -32,6 +32,7 @@ const ConfigSchema = z.object({
     .object({
       provider: EmbeddingProviderSchema.default("auto"),
       model: z.enum(["8b", "4b"]).optional(),
+      queryCacheSize: z.number().int().min(0).max(1024).default(64),
       overheadBuffer: z.number().min(0.1).max(0.5).default(0.25),
       ollama: z
         .object({ host: z.string().url().default("http://localhost:11434") })
