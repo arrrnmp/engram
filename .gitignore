@@ -3,6 +3,7 @@ server/node_modules/
 bun.lockb
 *.tgz
 .env
+config.json
 config.local.json
 .chroma-data/
 .venv/

@@ -4,9 +4,9 @@
   },
   "server": {
     "port": 7384,
-    "https": true,
-    "certFile": "/Users/aaron/Documents/engram/certs/localhost.pem",
-    "keyFile": "/Users/aaron/Documents/engram/certs/localhost-key.pem"
+    "https": false,
+    "certFile": "/path/to/certs/localhost.pem",
+    "keyFile": "/path/to/certs/localhost-key.pem"
   },
   "chroma": {
     "host": "http://localhost:8000",
@@ -24,6 +24,10 @@
     },
     "nvidia": {
       "host": "http://localhost:8001"
+    },
+    "openai": {
+      "apiKey": "sk-...",
+      "model": "text-embedding-3-small"
     }
   }
 }
