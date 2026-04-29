@@ -14,7 +14,13 @@ Obsidian Vault (YYYY-MM-DD/title.md)
   Embedding Model (Qwen3-Embedding via Ollama / NVIDIA vLLM / OpenAI)
 ```
 
-**Skills** (`/save-memory`, `/prefill`, `/update-important-memory`) are user-invokable only — the model never runs them automatically. `surface-memories` is agent-only and auto-triggered.
+Each Engram carries a stable UUID in its frontmatter. At startup the server scans the vault to build an in-memory index (UUID → file path) and re-embeds any files that are missing from ChromaDB. This means files can be freely renamed in Obsidian without breaking the index — the UUID survives the rename.
+
+**Skills** are agent instructions loaded by the harness:
+- `/save-memory`, `/prefill`, `/update-important-memory`, `/dilucidate` — user-invocable only, never run automatically
+- `surface-memories` — agent-only, auto-triggered when a conversation touches a known topic
+
+All engram content, IMPORTANT.md, and search queries are enforced in **English** regardless of the conversation language, for consistent embedding alignment.
 
 ## Setup
 
@@ -105,10 +111,11 @@ For other MCP clients, add manually:
 
 | Skill | Invoke | What it does |
 |---|---|---|
-| `save-memory` | `/save-memory` | Saves the conversation as Engrams with wikilinks |
-| `prefill` | `/prefill` | Loads IMPORTANT.md into context |
-| `update-important-memory` | `/update-important-memory` | Reviews all Engrams and rewrites IMPORTANT.md |
-| `surface-memories` | *(auto-triggered)* | Silently searches for relevant context when a conversation touches a known topic |
+| `save-memory` | `/save-memory` | Full extraction pass over the conversation → saves 2–5 focused Engrams with wikilinks |
+| `prefill` | `/prefill` | Loads IMPORTANT.md into context at the start of a session |
+| `update-important-memory` | `/update-important-memory` | Reviews all Engrams and rewrites the persistent user profile |
+| `dilucidate` | `/dilucidate` | Weekly memory graph analysis: clusters related memories, flags contradictions, creates missing wikilinks, saves summaries, backfills tags, surfaces decaying memories — two-phase with approval gate |
+| `surface-memories` | *(auto-triggered)* | Silently searches for relevant context when a conversation touches a known topic; incorporates findings without announcing them |
 
 ## MCP Tools
 
@@ -116,12 +123,16 @@ The server exposes these tools directly (used by skills internally):
 
 | Tool | Description |
 |---|---|
-| `save_memory` | Write an Engram, embed it, generate wikilinks |
-| `search_memory` | Semantic search across all Engrams (filterable by date range and type) |
+| `save_memory` | Write an Engram, embed it, generate wikilinks. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
+| `search_memory` | Semantic search across all Engrams. Filterable by date range and type |
+| `list_engrams` | List Engrams, filterable by date range. Returns UUID, title, date, filename, type |
+| `read_engram` | Read the full content of a specific Engram by UUID |
+| `update_engram` | Add tags or wikilinks to an existing Engram without re-embedding it |
+| `cluster_memories` | Compute semantic clusters across all Engrams — returns groups, avg similarity, and missing wikilinks within each cluster. Used by `/dilucidate` |
 | `get_important_context` | Read IMPORTANT.md |
 | `update_important_context` | Write IMPORTANT.md |
-| `list_engrams` | List Engrams by date range |
-| `read_engram` | Read the full content of a specific Engram by ID |
+| `get_dilucidate_meta` | Read `.dilucidate-meta.json` (run history and early-exit state for `/dilucidate`) |
+| `update_dilucidate_meta` | Write `.dilucidate-meta.json` after a `/dilucidate` run |
 
 ## Embedding Providers
 
@@ -140,12 +151,30 @@ The server auto-detects the best provider for your hardware:
 
 ```
 ~/Documents/my-engram-vault/
-├── IMPORTANT.md              ← persistent user profile
-├── 2026-04-26/
-│   └── Engram project goals.md
-├── 2026-04-25/
-│   └── TypeScript preferences.md
+├── IMPORTANT.md                        ← persistent user profile
+├── .dilucidate-meta.json               ← /dilucidate run history
+├── 2026-04-29/
+│   └── Emotional Regulation Goals.md   ← human-readable filenames
+├── 2026-04-28/
+│   └── BPD Profile — Criteria, Splitting, Favourite Persons.md
 └── ...
 ```
 
-Each Engram is a standard markdown file with YAML frontmatter and `[[wikilinks]]` to related memories — fully readable in Obsidian, including the graph view.
+Each Engram is a standard markdown file with YAML frontmatter and `[[wikilinks]]` to related memories — fully readable in Obsidian, including graph view.
+
+```yaml
+---
+id: "3f7a2c1d-..."      ← stable UUID; survives renames
+title: "Emotional Regulation Goals"
+date: "2026-04-29"
+type: "chat"
+tags: ["psychology", "goals"]
+---
+
+Engram content here.
+
+## Related Memories
+- [[2026-04-28/BPD Profile — Criteria, Splitting, Favourite Persons]]
+```
+
+Filenames preserve spaces, capitals, and symbols — anything valid on macOS and Windows. The UUID in frontmatter is the stable identity used by ChromaDB; the filename is purely for human readability. Obsidian's built-in rename handling keeps `[[wikilinks]]` consistent when files are moved or renamed.
