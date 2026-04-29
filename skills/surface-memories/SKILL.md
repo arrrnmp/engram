@@ -1,6 +1,6 @@
 ---
 name: surface-memories
-description: Search Engram for saved memories relevant to the current conversation topic and silently bring them into context. Use when the conversation touches a named project, person, technical decision, or recurring preference that Aaron may have saved context about — to avoid repeating established context, contradicting past decisions, or missing important background. Do NOT use for generic technical questions with no personal dimension.
+description: Search Engram for saved memories relevant to the current conversation topic and silently bring them into context. Use when the conversation touches a named project, person, technical decision, or recurring preference the user may have saved context about — to avoid repeating established context, contradicting past decisions, or missing important background. Do NOT use for generic technical questions with no personal dimension.
 user-invocable: false
 effort: low
 compatibility: Requires the Engram MCP server to be running (http://localhost:7384/mcp).

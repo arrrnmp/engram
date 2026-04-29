@@ -16,7 +16,7 @@ You have been explicitly asked to rebuild the user's persistent memory profile f
 
 ## Purpose
 
-IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of every session via /prefill. It should capture durable facts — not a log of past conversations. Length should match the amount of relevant information: if Aaron has a lot of important context across many domains, the file should reflect that fully. Do not trim detail to hit a word target.
+IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of every session via /prefill. It should capture durable facts — not a log of past conversations. Length should match the amount of relevant information: if the user has a lot of important context across many domains, the file should reflect that fully. Do not trim detail to hit a word target.
 
 ## Steps
 
@@ -33,7 +33,7 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
 
 4. **Read the full content** of all engrams using `read_engram`. Excerpts from `search_memory` are truncated — full reads are required to avoid losing detail. Do not skip engrams; the current IMPORTANT.md may contain facts (hardware, homelab, projects, relationships) that came from engrams not surfaced by the theme searches.
 
-5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user ("Aaron prefers…", "Aaron is working on…", never "You prefer…").
+5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user. Use whatever name or pronoun the user goes by (e.g. "Alex prefers…", "They are working on…"), never "You prefer…".
 
    **Preserve everything that matters.** The existing IMPORTANT.md is the baseline — treat every fact in it as worth keeping unless a newer engram explicitly contradicts or supersedes it. New engrams add to the profile; they do not replace it. Length is determined by the content, not a word limit. A richer profile is better than a shorter one.
 
@@ -48,4 +48,4 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
 - Prefer the most recent information when facts conflict across Engrams.
 - Do not include ephemeral details (what you discussed today, specific error messages, etc.).
 - Keep it stable: the profile should change slowly over months, not session to session.
-- Never truncate for length. If the profile is long because Aaron's context is rich, that is correct behaviour.
+- Never truncate for length. If the profile is long because the user's context is rich, that is correct behaviour.
