@@ -151,12 +151,12 @@ The server auto-detects the best provider for your hardware:
 
 ```
 ~/Documents/my-engram-vault/
-├── IMPORTANT.md                        ← persistent user profile
-├── .dilucidate-meta.json               ← /dilucidate run history
+├── IMPORTANT.md                                   ← persistent user profile
+├── .dilucidate-meta.json                          ← /dilucidate run history
 ├── 2026-04-29/
-│   └── Emotional Regulation Goals.md   ← human-readable filenames
+│   └── Rust Async Runtime — Design Decisions.md  ← human-readable filenames
 ├── 2026-04-28/
-│   └── BPD Profile — Criteria, Splitting, Favourite Persons.md
+│   └── Homelab Network Architecture.md
 └── ...
 ```
 
@@ -168,16 +168,16 @@ id: "3f7a2c1d-..."         ← stable UUID; survives renames
 abstract: "A 3–6 sentence summary of the engram's key content, written in
   English. Enables cheap full-vault scanning via list_engrams without
   reading every file body."
-title: "Emotional Regulation Goals"
+title: "Rust Async Runtime — Design Decisions"
 date: "2026-04-29"
-type: "chat"
-tags: ["psychology", "goals"]
+type: "decision"
+tags: ["rust", "architecture"]
 ---
 
 Engram content here.
 
 ## Related Memories
-- [[2026-04-28/BPD Profile — Criteria, Splitting, Favourite Persons]]
+- [[2026-04-28/Homelab Network Architecture]]
 ```
 
 Filenames preserve spaces, capitals, and symbols — anything valid on macOS and Windows. The UUID in frontmatter is the stable identity used by ChromaDB; the filename is purely for human readability. The `abstract` field lets skills scan the entire vault cheaply — `list_engrams` returns it without reading file bodies, so skills like `/update-important-memory` and `/dilucidate` can make a first-pass decision without calling `read_engram` on every file. Obsidian's built-in rename handling keeps `[[wikilinks]]` consistent when files are moved or renamed.
