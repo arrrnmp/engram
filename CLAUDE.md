@@ -43,7 +43,7 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 | `config.ts` | Zod-validated config loading from `config.json` / `config.local.json` |
 | `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. |
 | `vault-index.ts` | `VaultIndex` — scans vault frontmatter at startup to build a UUID→filepath map; `resolveWithFallback` handles mid-session renames and deletes stale ChromaDB entries for missing files |
-| `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings` |
+| `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata` (metadata-only update, no re-embed) |
 | `wikilinks.ts` | Bidirectional `[[wikilinks]]` between semantically similar engrams. Takes `chromaId` (UUID, for self-exclusion) and `wikiPath` (date/filename, for link text) as separate params |
 | `embeddings/index.ts` | Provider factory — `createEmbeddingProvider()` dispatches to Ollama, NVIDIA vLLM, or OpenAI based on config + hardware |
 | `embeddings/cache.ts` | `LRUEmbeddingCache` — in-process LRU cache for query embeddings. Used by `search_memory` to skip re-embedding repeated queries. Size configurable via `embedding.queryCacheSize` |
@@ -54,6 +54,7 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 | `dilucidate/cluster.ts` | Core clustering algorithm — pairwise cosine similarity, connected-components BFS, missing wikilink detection |
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram, upserts to ChromaDB |
 | `tools/search-memory.ts` | Semantic search with optional date/type filter. Accepts optional `LRUEmbeddingCache` to skip re-embedding repeated queries |
+| `tools/delete-engram.ts` | Permanently deletes an engram — removes vault file, ChromaDB entry, and VaultIndex entry |
 | `tools/read-engram.ts` | Resolves UUID via VaultIndex, reads file |
 | `tools/list-engrams.ts` | Lists engrams from vault with frontmatter-parsed titles, IDs, and abstracts — no file body reads |
 | `tools/update-engram.ts` | Updates an existing engram in-place: `setAbstract`, `addTags`, `setContent` (re-embeds), `addWikilinks`. Uses `gray-matter` for parse→mutate→reformat via `formatEngram` |
@@ -70,13 +71,13 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 4. `vault.writeEngram()` — writes markdown with YAML frontmatter (`id`, `abstract`, `title`, `date`, `type`, `tags`) + `## Related Memories` section
 5. `chroma.upsert()` — indexes embedding + metadata in ChromaDB, keyed by UUID
 
-Note: `abstract` lives only in the vault frontmatter, not in ChromaDB. It is returned by `list_engrams` from a direct file scan, enabling cheap full-vault passes without `read_engram` calls.
+Note: `abstract` is stored in **both** the vault frontmatter and in ChromaDB metadata. `list_engrams` reads it from the vault (no ChromaDB call needed). `search_memory` returns it from ChromaDB metadata alongside each result. When `update_engram` sets a new abstract, it updates both the vault file and ChromaDB via `patchMetadata` (no re-embedding).
 
 ### Engram identity
 
 Each engram has a **UUID** stored in its frontmatter (`id: "..."`). This is the stable identity used by ChromaDB and all MCP tools. Filenames use the title as-is (spaces, capitals, and symbols preserved — only filesystem-invalid characters stripped). Wikilinks use vault paths (`[[date/filename]]`) so Obsidian's graph view stays human-readable. Because the UUID lives inside the file, Obsidian can rename files freely without breaking the index.
 
-Each engram also carries an **abstract** in frontmatter — a required paragraph (3–6 sentences) summarising the key content. The abstract is returned by `list_engrams` from a direct frontmatter scan, allowing skills to do a full-vault first pass without calling `read_engram` on every file. This is the primary scalability mechanism for skills like `/update-important-memory` and `/dilucidate`.
+Each engram also carries an **abstract** in frontmatter — a required paragraph (3–6 sentences) summarising the key content. The abstract is stored in both the vault file and ChromaDB metadata. `list_engrams` returns it from the vault (no ChromaDB call); `search_memory` returns it from ChromaDB alongside results. This dual storage means skills can do a cheap full-vault first pass via `list_engrams` without `read_engram` calls, and search results carry enough context to avoid a follow-up read in most cases. This is the primary scalability mechanism for skills like `/update-important-memory` and `/dilucidate`.
 
 ### Config resolution
 

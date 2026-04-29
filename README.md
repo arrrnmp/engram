@@ -89,6 +89,14 @@ For OpenAI embeddings (no local runtime needed):
 }
 ```
 
+To tune the query embedding cache (default 64 entries, set to 0 to disable):
+
+```json
+{
+  "embedding": { "queryCacheSize": 128 }
+}
+```
+
 ### 4. Connect your agent
 
 The setup script auto-registers Engram's MCP endpoint and installs skills for all detected agent tools. Supported:
@@ -130,7 +138,7 @@ The server exposes these tools directly (used by skills internally):
 | Tool | Description |
 |---|---|
 | `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, and `content`. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
-| `search_memory` | Semantic search across all Engrams. Returns `abstract` on each result. Filterable by date range and type |
+| `search_memory` | Semantic search across all Engrams. Returns `abstract` from ChromaDB metadata on each result (no extra file reads). Filterable by date range and type |
 | `list_engrams` | List Engrams, filterable by date range. Supports `limit` and `offset` for pagination. Returns UUID, title, abstract, date, filename, type — without reading full file bodies |
 | `read_engram` | Read the full content of a specific Engram by UUID |
 | `update_engram` | Update an existing Engram in-place: `setAbstract` (synced to ChromaDB), `setContent` (replaces body and re-embeds), `addTags`, `addWikilinks` |
