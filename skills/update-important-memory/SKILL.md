@@ -35,7 +35,7 @@ IMPORTANT.md is a concise, evergreen profile of the user. It is loaded at the st
 
    See [references/strategy.md](references/strategy.md) for guidance on what to include.
 
-4. **Synthesize** the findings into a new IMPORTANT.md. Write in **third person** — this file is read by a future AI model, not by the user ("Aaron prefers…", "Aaron is working on…", never "You prefer…"). Keep it under 400 words. Focus on what a future AI assistant genuinely needs to know to be useful to this user.
+4. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user ("Aaron prefers…", "Aaron is working on…", never "You prefer…"). Keep it under 400 words. Focus on what a future AI assistant genuinely needs to know to be useful to this user.
 
 5. **Call `update_important_context`** with the synthesized content.
 
