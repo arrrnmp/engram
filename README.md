@@ -123,11 +123,11 @@ The server exposes these tools directly (used by skills internally):
 
 | Tool | Description |
 |---|---|
-| `save_memory` | Write an Engram, embed it, generate wikilinks. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
+| `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, and `content`. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
 | `search_memory` | Semantic search across all Engrams. Filterable by date range and type |
-| `list_engrams` | List Engrams, filterable by date range. Returns UUID, title, date, filename, type |
+| `list_engrams` | List Engrams, filterable by date range. Returns UUID, title, abstract, date, filename, type — without reading full file bodies |
 | `read_engram` | Read the full content of a specific Engram by UUID |
-| `update_engram` | Add tags or wikilinks to an existing Engram without re-embedding it |
+| `update_engram` | Update an existing Engram in-place without re-embedding: set abstract (`setAbstract`), add tags (`addTags`), add wikilinks (`addWikilinks`) |
 | `cluster_memories` | Compute semantic clusters across all Engrams — returns groups, avg similarity, and missing wikilinks within each cluster. Used by `/dilucidate` |
 | `get_important_context` | Read IMPORTANT.md |
 | `update_important_context` | Write IMPORTANT.md |
@@ -164,7 +164,10 @@ Each Engram is a standard markdown file with YAML frontmatter and `[[wikilinks]]
 
 ```yaml
 ---
-id: "3f7a2c1d-..."      ← stable UUID; survives renames
+id: "3f7a2c1d-..."         ← stable UUID; survives renames
+abstract: "A 3–6 sentence summary of the engram's key content, written in
+  English. Enables cheap full-vault scanning via list_engrams without
+  reading every file body."
 title: "Emotional Regulation Goals"
 date: "2026-04-29"
 type: "chat"
@@ -177,4 +180,4 @@ Engram content here.
 - [[2026-04-28/BPD Profile — Criteria, Splitting, Favourite Persons]]
 ```
 
-Filenames preserve spaces, capitals, and symbols — anything valid on macOS and Windows. The UUID in frontmatter is the stable identity used by ChromaDB; the filename is purely for human readability. Obsidian's built-in rename handling keeps `[[wikilinks]]` consistent when files are moved or renamed.
+Filenames preserve spaces, capitals, and symbols — anything valid on macOS and Windows. The UUID in frontmatter is the stable identity used by ChromaDB; the filename is purely for human readability. The `abstract` field lets skills scan the entire vault cheaply — `list_engrams` returns it without reading file bodies, so skills like `/update-important-memory` and `/dilucidate` can make a first-pass decision without calling `read_engram` on every file. Obsidian's built-in rename handling keeps `[[wikilinks]]` consistent when files are moved or renamed.

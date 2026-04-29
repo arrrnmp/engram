@@ -53,8 +53,8 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram, upserts to ChromaDB |
 | `tools/search-memory.ts` | Semantic search with optional date/type filter |
 | `tools/read-engram.ts` | Resolves UUID via VaultIndex, reads file |
-| `tools/list-engrams.ts` | Lists engrams from vault with frontmatter-parsed titles and IDs |
-| `tools/update-engram.ts` | Adds tags or wikilinks to an existing engram in-place; no re-embedding |
+| `tools/list-engrams.ts` | Lists engrams from vault with frontmatter-parsed titles, IDs, and abstracts — no file body reads |
+| `tools/update-engram.ts` | Updates an existing engram in-place (no re-embedding): `setAbstract`, `addTags`, `addWikilinks` |
 | `tools/context.ts` | Read/write IMPORTANT.md |
 | `tools/dilucidate/cluster.ts` | `cluster_memories` MCP tool — wraps the clustering algorithm |
 | `tools/dilucidate-meta.ts` | Read/write `.dilucidate-meta.json` for `/dilucidate` run state |
@@ -65,12 +65,16 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 1. `crypto.randomUUID()` — generates a stable ID stored in frontmatter
 2. `embedder.embed(content)` — single embedding of the body text
 3. `generateAndApplyWikilinks(chromaId, wikiPath, ...)` — searches ChromaDB for similar engrams, writes backlinks into existing vault files using vault paths (not UUIDs)
-4. `vault.writeEngram()` — writes markdown with YAML frontmatter (including `id:`) + `## Related Memories` section
+4. `vault.writeEngram()` — writes markdown with YAML frontmatter (`id`, `abstract`, `title`, `date`, `type`, `tags`) + `## Related Memories` section
 5. `chroma.upsert()` — indexes embedding + metadata in ChromaDB, keyed by UUID
+
+Note: `abstract` lives only in the vault frontmatter, not in ChromaDB. It is returned by `list_engrams` from a direct file scan, enabling cheap full-vault passes without `read_engram` calls.
 
 ### Engram identity
 
 Each engram has a **UUID** stored in its frontmatter (`id: "..."`). This is the stable identity used by ChromaDB and all MCP tools. Filenames use the title as-is (spaces, capitals, and symbols preserved — only filesystem-invalid characters stripped). Wikilinks use vault paths (`[[date/filename]]`) so Obsidian's graph view stays human-readable. Because the UUID lives inside the file, Obsidian can rename files freely without breaking the index.
+
+Each engram also carries an **abstract** in frontmatter — a required paragraph (3–6 sentences) summarising the key content. The abstract is returned by `list_engrams` from a direct frontmatter scan, allowing skills to do a full-vault first pass without calling `read_engram` on every file. This is the primary scalability mechanism for skills like `/update-important-memory` and `/dilucidate`.
 
 ### Config resolution
 
