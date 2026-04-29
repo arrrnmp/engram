@@ -31,7 +31,7 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
    - `"personal background and role"`
    - `"important decisions and constraints"`
 
-4. **Read the full content** of all engrams using `read_engram`. Excerpts from `search_memory` are truncated — full reads are required to avoid losing detail. Do not skip engrams; the current IMPORTANT.md may contain facts (hardware, homelab, projects, relationships) that came from engrams not surfaced by the theme searches.
+4. **Read every engram in full.** For each `id` returned by `list_engrams` in step 1, call `read_engram`. Use the list from step 1 as the source — not the search results from step 3, which are a subset. Do not skip any engram. Facts about hardware, homelabs, projects, relationships, and preferences often live in engrams that don't score highly on theme searches but are still essential to the profile.
 
 5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user. Use whatever name or pronoun the user goes by (e.g. "Alex prefers…", "They are working on…"), never "You prefer…".
 
