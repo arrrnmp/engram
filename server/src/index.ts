@@ -155,13 +155,13 @@ function createSession(): Session {
   // ── Tool: search_memory ─────────────────────────────────────────────────────
   server.tool(
     "search_memory",
-    "Semantic search across all saved Engrams using a natural language query. Optionally filter by type (e.g. \"code\", \"chat\", \"idea\", \"decision\").",
+    "Search saved Engrams. mode=\"semantic\" (default): vector similarity. mode=\"keyword\": exact term scan — best for proper nouns, hostnames, IDs. mode=\"hybrid\": weighted merge of both (0.7 semantic + 0.3 keyword).",
     SearchMemoryInput.shape,
     async (input) => {
-      const { query, n_results } = input as z.infer<typeof SearchMemoryInput>;
-      logger.info(`[tool] search_memory: "${query}" (n=${n_results ?? 5})`);
+      const { query, n_results, mode } = input as z.infer<typeof SearchMemoryInput>;
+      logger.info(`[tool] search_memory: "${query}" (n=${n_results ?? 5}, mode=${mode ?? "semantic"})`);
       try {
-        const result = await searchMemory(input as z.infer<typeof SearchMemoryInput>, chroma, embedder, queryCache);
+        const result = await searchMemory(input as z.infer<typeof SearchMemoryInput>, chroma, embedder, vault, queryCache);
         logger.info(`[tool] search_memory: ${result.results.length} results`);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       } catch (err) {

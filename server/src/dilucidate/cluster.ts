@@ -15,6 +15,11 @@ export interface MissingLink {
   similarity: number;
 }
 
+// Below this count use exact O(n²) pairwise; above it switch to O(n·k) neighbor search.
+const CROSSOVER = 300;
+// Number of neighbors to fetch per engram in the scalable path.
+const K_NEIGHBORS = 15;
+
 export async function clusterMemories(
   chroma: EngramChroma,
   vault: Vault,
@@ -31,26 +36,50 @@ export async function clusterMemories(
     return { clusters: [], totalEngrams };
   }
 
-  // Build pairwise similarity for all pairs above threshold.
   const adj = new Map<string, Set<string>>();
   const similarities = new Map<string, number>(); // edgeKey → similarity
 
-  for (let i = 0; i < items.length; i++) {
-    for (let j = i + 1; j < items.length; j++) {
-      const sim = cosineSimilarity(items[i].embedding, items[j].embedding);
-      if (sim >= threshold) {
-        const a = items[i].id;
-        const b = items[j].id;
-        if (!adj.has(a)) adj.set(a, new Set());
-        if (!adj.has(b)) adj.set(b, new Set());
-        adj.get(a)!.add(b);
-        adj.get(b)!.add(a);
-        similarities.set(edgeKey(a, b), sim);
+  if (items.length <= CROSSOVER) {
+    // ── Exact O(n²) pairwise — fast enough for small vaults ─────────────────
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const sim = cosineSimilarity(items[i].embedding, items[j].embedding);
+        if (sim >= threshold) {
+          const a = items[i].id;
+          const b = items[j].id;
+          if (!adj.has(a)) adj.set(a, new Set());
+          if (!adj.has(b)) adj.set(b, new Set());
+          adj.get(a)!.add(b);
+          adj.get(b)!.add(a);
+          similarities.set(edgeKey(a, b), sim);
+        }
+      }
+    }
+  } else {
+    // ── Approximate O(n·k) neighbor search — scalable for large vaults ───────
+    // Each engram queries ChromaDB for its K_NEIGHBORS nearest neighbors.
+    // Edges are only added when similarity >= threshold.
+    for (const item of items) {
+      const neighbors = await chroma.searchByEmbedding(
+        item.embedding,
+        K_NEIGHBORS,
+        item.id,
+        dateRange
+      );
+      for (const neighbor of neighbors) {
+        if (neighbor.similarity < threshold) continue;
+        const key = edgeKey(item.id, neighbor.id);
+        if (similarities.has(key)) continue; // already seen from the other direction
+        if (!adj.has(item.id)) adj.set(item.id, new Set());
+        if (!adj.has(neighbor.id)) adj.set(neighbor.id, new Set());
+        adj.get(item.id)!.add(neighbor.id);
+        adj.get(neighbor.id)!.add(item.id);
+        similarities.set(key, neighbor.similarity);
       }
     }
   }
 
-  // Connected components via BFS.
+  // ── Connected components via BFS (identical in both paths) ────────────────
   const visited = new Set<string>();
   const clusters: Cluster[] = [];
   let clusterIdx = 0;
@@ -77,9 +106,9 @@ export async function clusterMemories(
     let pairCount = 0;
     const missingLinks: MissingLink[] = [];
 
-    // Only iterate directly-similar pairs (edges above threshold).
-    // Transitive cluster members without a direct similarity edge are
-    // not candidates for wikilinks — they're related via a third engram.
+    // Only check directly-similar pairs (edges above threshold).
+    // Transitive members without a direct edge are related via a third engram
+    // and are not candidates for wikilinks.
     for (let i = 0; i < component.length; i++) {
       for (let j = i + 1; j < component.length; j++) {
         const sim = similarities.get(edgeKey(component[i], component[j]));
@@ -120,7 +149,6 @@ function edgeKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-// Check if either engram already links to the other.
 function hasWikilink(
   vault: Vault,
   vaultIndex: VaultIndex,

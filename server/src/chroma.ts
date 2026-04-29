@@ -124,6 +124,21 @@ export class EngramChroma {
     }));
   }
 
+  /** Search by a raw embedding vector, excluding `excludeId` from results. Used by clustering. */
+  async searchByEmbedding(
+    queryEmbedding: number[],
+    nResults: number,
+    excludeId: string,
+    dateRange?: { from?: string; to?: string }
+  ): Promise<Array<{ id: string; similarity: number; date: string; filename: string; title: string }>> {
+    // Fetch one extra to account for the self-match being filtered out.
+    const results = await this.search(queryEmbedding, nResults + 1, dateRange);
+    return results
+      .filter((r) => r.id !== excludeId)
+      .slice(0, nResults)
+      .map((r) => ({ id: r.id, similarity: r.similarity, date: r.date, filename: r.filename, title: r.title }));
+  }
+
   async delete(id: string): Promise<void> {
     await this.col.delete({ ids: [id] });
   }

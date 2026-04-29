@@ -43,7 +43,7 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 | `config.ts` | Zod-validated config loading from `config.json` / `config.local.json` |
 | `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. |
 | `vault-index.ts` | `VaultIndex` — scans vault frontmatter at startup to build a UUID→filepath map; `resolveWithFallback` handles mid-session renames and deletes stale ChromaDB entries for missing files |
-| `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata` (metadata-only update, no re-embed) |
+| `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata` (metadata-only update, no re-embed), `searchByEmbedding` (neighbor lookup for clustering) |
 | `wikilinks.ts` | Bidirectional `[[wikilinks]]` between semantically similar engrams. Takes `chromaId` (UUID, for self-exclusion) and `wikiPath` (date/filename, for link text) as separate params |
 | `embeddings/index.ts` | Provider factory — `createEmbeddingProvider()` dispatches to Ollama, NVIDIA vLLM, or OpenAI based on config + hardware |
 | `embeddings/cache.ts` | `LRUEmbeddingCache` — in-process LRU cache for query embeddings. Used by `search_memory` to skip re-embedding repeated queries. Size configurable via `embedding.queryCacheSize` |
@@ -51,9 +51,10 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs
 | `embeddings/openai-compat.ts` | OpenAI `/v1/embeddings` client (also used for NVIDIA vLLM) |
 | `hardware/detect.ts` | Detects Apple Silicon, NVIDIA (Blackwell vs older), or CPU |
 | `hardware/memory.ts` | Steps through model variants (8B→4B, q8→q4) to fit available memory |
-| `dilucidate/cluster.ts` | Core clustering algorithm — pairwise cosine similarity, connected-components BFS, missing wikilink detection |
+| `dilucidate/cluster.ts` | Core clustering algorithm. ≤300 engrams: exact O(n²) pairwise cosine similarity. >300 engrams: O(n·k) neighbor search via `chroma.searchByEmbedding` (k=15, approximate). Connected-components BFS + missing wikilink detection shared by both paths |
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram, upserts to ChromaDB |
-| `tools/search-memory.ts` | Semantic search with optional date/type filter. Accepts optional `LRUEmbeddingCache` to skip re-embedding repeated queries |
+| `tools/search-memory.ts` | Search with `mode`: `"semantic"` (default, vector similarity), `"keyword"` (vault scan via `search/keyword.ts`), `"hybrid"` (0.7 semantic + 0.3 keyword merge). LRU cache skips re-embedding repeated queries |
+| `search/keyword.ts` | In-process keyword search: tokenizes query, filters on title+abstract, reads body only for candidates. Returns scored results with excerpt anchored at first match |
 | `tools/delete-engram.ts` | Permanently deletes an engram — removes vault file, ChromaDB entry, and VaultIndex entry |
 | `tools/read-engram.ts` | Resolves UUID via VaultIndex, reads file |
 | `tools/list-engrams.ts` | Lists engrams from vault with frontmatter-parsed titles, IDs, and abstracts — no file body reads |

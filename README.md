@@ -138,7 +138,7 @@ The server exposes these tools directly (used by skills internally):
 | Tool | Description |
 |---|---|
 | `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, and `content`. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
-| `search_memory` | Semantic search across all Engrams. Returns `abstract` from ChromaDB metadata on each result (no extra file reads). Filterable by date range and type |
+| `search_memory` | Search Engrams by `mode`: `"semantic"` (default, vector similarity), `"keyword"` (exact term scan — best for names, IDs, hostnames), `"hybrid"` (0.7 semantic + 0.3 keyword). Returns `abstract` on each result. Filterable by date range and type |
 | `list_engrams` | List Engrams, filterable by date range. Supports `limit` and `offset` for pagination. Returns UUID, title, abstract, date, filename, type — without reading full file bodies |
 | `read_engram` | Read the full content of a specific Engram by UUID |
 | `update_engram` | Update an existing Engram in-place: `setAbstract` (synced to ChromaDB), `setContent` (replaces body and re-embeds), `addTags`, `addWikilinks` |
