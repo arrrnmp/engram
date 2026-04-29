@@ -13,6 +13,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface EngramEntry {
   id?: string;
+  abstract?: string;
   date: string;
   filename: string;
   title: string;
@@ -86,6 +87,7 @@ export class Vault {
         const raw = readFileSync(join(dirPath, filename), "utf-8");
         const parsed = parseEngram(raw);
         if (parsed.id) entry.id = parsed.id;
+        if (parsed.abstract) entry.abstract = parsed.abstract;
         if (parsed.title) entry.title = parsed.title;
         if (parsed.type) entry.type = parsed.type;
       } catch {}
@@ -110,6 +112,7 @@ export function toSlug(title: string): string {
 
 export function formatEngram(
   id: string,
+  abstract: string,
   title: string,
   date: string,
   content: string,
@@ -117,9 +120,12 @@ export function formatEngram(
   type?: string
 ): string {
   const typeLine = type ? `\ntype: "${type}"` : "";
+  // Normalize abstract to a single line for clean frontmatter storage.
+  const abstractEscaped = abstract.replace(/\n/g, " ").replace(/"/g, '\\"').trim();
   const frontmatter = [
     "---",
     `id: "${id}"`,
+    `abstract: "${abstractEscaped}"`,
     `title: "${title.replace(/"/g, '\\"')}"`,
     `date: "${date}"${typeLine}`,
     `tags: []`,
@@ -139,6 +145,7 @@ export function formatEngram(
 
 export interface ParsedEngram {
   id?: string;
+  abstract?: string;
   title?: string;
   date?: string;
   type?: string;
@@ -157,6 +164,7 @@ export function parseEngram(raw: string): ParsedEngram {
 
   return {
     id: fm.match(/^id:\s*"([^"]+)"/m)?.[1],
+    abstract: fm.match(/^abstract:\s*"((?:[^"\\]|\\.)*)"/m)?.[1]?.replace(/\\"/g, '"'),
     title: fm.match(/^title:\s*"((?:[^"\\]|\\.)*)"/m)?.[1]?.replace(/\\"/g, '"'),
     date: fm.match(/^date:\s*"([^"]+)"/m)?.[1],
     type: fm.match(/^type:\s*"([^"]+)"/m)?.[1],

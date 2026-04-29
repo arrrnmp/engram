@@ -29,6 +29,7 @@ export function listEngrams(input: ListEngramsInput, vault: Vault) {
       date: e.date,
       filename: e.filename,
       title: e.title,
+      ...(e.abstract ? { abstract: e.abstract } : {}),
       ...(e.type ? { type: e.type } : {}),
     })),
     total: all.length,

@@ -41,6 +41,7 @@ Aim for focused, searchable topics — not one giant dump, not trivially small f
 For each topic, compose a self-contained Engram and call `save_memory`:
 
 - **`title`**: 3–8 words, specific enough to be findable. Good: "Engram Server — Ollama Lifecycle Design". Poor: "Technical discussion".
+- **`abstract`**: A paragraph (3–6 sentences) that fully describes what this engram contains — enough for a future model to understand it without reading the body. Go well beyond the title: include the core facts, decisions, context, and why it matters. Written in English, third person.
 - **`content`**: Markdown. Always write in **English**, regardless of the language of the conversation. Write in **third person** — this is a note about the user for a future model, not a message to the user. Use whatever name or pronoun they go by (e.g. "Alex decided…", "They prefer…"), never "You decided…". Do not reference the conversation itself ("we discussed", "you mentioned") — write the facts directly as standing knowledge.
 - **`date`**: today's date in YYYY-MM-DD format.
 - **`type`**: use the most fitting category — `"chat"`, `"decision"`, `"code"`, `"idea"` — or omit if none fits.

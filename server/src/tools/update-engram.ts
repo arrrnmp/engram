@@ -6,6 +6,11 @@ import { updateEngramWikilinks } from "../vault.js";
 
 export const UpdateEngramInput = z.object({
   id: z.string().uuid().describe("Engram UUID (as returned by list_engrams or search_memory)"),
+  setAbstract: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Replace the abstract field in frontmatter with this value"),
   addTags: z
     .array(z.string().min(1).max(64))
     .optional()
@@ -30,6 +35,16 @@ export async function updateEngram(
   let content = vault.readEngram(location.date, location.filename);
   let tagsAdded = 0;
   let wikilinksAdded = 0;
+
+  if (input.setAbstract) {
+    const escaped = input.setAbstract.replace(/\n/g, " ").replace(/"/g, '\\"').trim();
+    if (/^abstract:\s*".*"$/m.test(content)) {
+      content = content.replace(/^abstract:\s*".*"$/m, `abstract: "${escaped}"`);
+    } else {
+      // No abstract line yet — insert after the id line.
+      content = content.replace(/^(id:\s*"[^"]+")$/m, `$1\nabstract: "${escaped}"`);
+    }
+  }
 
   if (input.addTags && input.addTags.length > 0) {
     const match = content.match(/^tags:\s*\[(.*?)\]/m);
@@ -63,8 +78,9 @@ export async function updateEngram(
 
   return {
     id: input.id,
+    abstractSet: !!input.setAbstract,
     tagsAdded,
     wikilinksAdded,
-    message: `Updated: ${tagsAdded} tag(s) added, ${wikilinksAdded} wikilink(s) added`,
+    message: `Updated: ${input.setAbstract ? "abstract set, " : ""}${tagsAdded} tag(s) added, ${wikilinksAdded} wikilink(s) added`,
   };
 }

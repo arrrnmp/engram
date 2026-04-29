@@ -7,6 +7,7 @@ import { generateAndApplyWikilinks } from "../wikilinks.js";
 
 export const SaveMemoryInput = z.object({
   title: z.string().min(1).max(128).describe("Short title for this memory"),
+  abstract: z.string().min(1).describe("A paragraph summarising the engram's key content — enough for a future model to understand what it contains without reading the full body. Should go well beyond the title: include the core facts, decisions, context, and why it matters."),
   content: z.string().min(1).describe("The memory content in markdown"),
   date: z
     .string()
@@ -43,7 +44,7 @@ export async function saveMemory(
     config.wikilinks.maxLinks
   );
 
-  vault.writeEngram(date, input.title, formatEngram(id, input.title, date, input.content, wikilinks, input.type));
+  vault.writeEngram(date, input.title, formatEngram(id, input.abstract, input.title, date, input.content, wikilinks, input.type));
 
   // Index in ChromaDB.
   await chroma.upsert(
