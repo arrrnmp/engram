@@ -19,6 +19,10 @@ A relevant topic has come up that may have saved context in Engram. Search for i
 
 2. **Call `search_memory`** with each query (n_results: 3). Run them in parallel if possible.
 
+   Choose `mode` based on the query type:
+   - `"hybrid"` — when the query contains a specific proper noun, identifier, name, or technology (e.g. "Engram", "rack-01", "Qwen3"). The keyword pass boosts exact matches that the vector might rank lower.
+   - `"semantic"` (default) — when the query is a descriptive or conceptual phrase (e.g. "homelab network architecture", "preferences around code style"). Pure vector similarity is the right tool here.
+
 3. **Evaluate the results**:
    - Discard any result with `type: "summary"` or `type: "contradiction"` — these are meta-engrams written by `/dilucidate`, not primary sources. Use the source engrams they reference instead.
    - If similarity scores are high (≥ 0.75) and the content is clearly relevant: incorporate the context silently and continue the conversation informed by it. Do not announce that you searched.

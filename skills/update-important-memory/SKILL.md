@@ -38,6 +38,10 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
    - `"personal background and role"`
    - `"important decisions and constraints"`
 
+   These are conceptual queries — use the default `mode: "semantic"`.
+
+   If a specific named project, tool, technology, or person surfaced during the abstract scan in step 3, add a targeted query for it using `mode: "hybrid"`. The keyword pass gives exact-match lift for proper nouns that the vector might rank below thematically related but less relevant results.
+
    Call `read_engram` for any result not already read in step 3.
 
 5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user. Use whatever name or pronoun the user goes by (e.g. "Alex prefers…", "They are working on…"), never "You prefer…".
