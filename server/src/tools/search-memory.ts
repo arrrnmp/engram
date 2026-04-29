@@ -57,6 +57,7 @@ export async function searchMemory(
       filename: r.filename,
       excerpt: r.excerpt,
       similarity: Math.round(r.similarity * 1000) / 1000,
+      ...(r.abstract ? { abstract: r.abstract } : {}),
       ...(r.type ? { type: r.type } : {}),
     })),
     total: results.length,

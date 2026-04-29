@@ -8,6 +8,7 @@ export interface EngramRecord {
   date: string;
   filename: string;
   vaultPath: string;
+  abstract?: string;
   type?: string;
 }
 
@@ -18,6 +19,7 @@ export interface SearchResult {
   filename: string;
   excerpt: string;
   similarity: number;
+  abstract?: string;
   type?: string;
 }
 
@@ -50,6 +52,7 @@ export class EngramChroma {
       filename: record.filename,
       vaultPath: record.vaultPath,
     };
+    if (record.abstract) metadata.abstract = record.abstract;
     if (record.type) metadata.type = record.type;
 
     await this.col.upsert({
@@ -57,6 +60,17 @@ export class EngramChroma {
       embeddings: [embedding],
       documents: [record.content],
       metadatas: [metadata],
+    });
+  }
+
+  /** Merge `patch` into an existing document's metadata without touching its embedding. */
+  async patchMetadata(id: string, patch: Record<string, string>): Promise<void> {
+    const result = await this.col.get({ ids: [id], include: ["metadatas"] as any });
+    if (!result.ids.length) return; // not in ChromaDB — skip silently
+    const existing = (result.metadatas[0] ?? {}) as Record<string, string>;
+    await this.col.update({
+      ids: [id],
+      metadatas: [{ ...existing, ...patch }],
     });
   }
 
@@ -86,6 +100,7 @@ export class EngramChroma {
       filename: (metadatas[i]?.filename as string) ?? "",
       excerpt: truncate(documents[i] ?? "", 300),
       similarity: 1 - (distances[i] ?? 1),
+      abstract: (metadatas[i]?.abstract as string) ?? undefined,
       type: (metadatas[i]?.type as string) ?? undefined,
     }));
   }
@@ -104,6 +119,7 @@ export class EngramChroma {
       filename: (results.metadatas[i]?.filename as string) ?? "",
       excerpt: truncate(results.documents[i] ?? "", 300),
       similarity: 1,
+      abstract: (results.metadatas[i]?.abstract as string) ?? undefined,
       type: (results.metadatas[i]?.type as string) ?? undefined,
     }));
   }

@@ -12,6 +12,7 @@ import { getImportantContext, updateImportantContext, UpdateContextInput } from 
 import { listEngrams, ListEngramsInput } from "./tools/list-engrams.js";
 import { readEngram, ReadEngramInput } from "./tools/read-engram.js";
 import { updateEngram, UpdateEngramInput } from "./tools/update-engram.js";
+import { deleteEngram, DeleteEngramInput } from "./tools/delete-engram.js";
 import { clusterMemoriesTool, ClusterMemoriesInput } from "./tools/dilucidate/cluster.js";
 import { getDilucidateMeta, updateDilucidateMeta, UpdateDilucidateMetaInput } from "./tools/dilucidate-meta.js";
 import { logger } from "./logger.js";
@@ -98,7 +99,7 @@ logger.info(`[engram] Vault index: ${vaultIndex.size()} engrams indexed.`);
         const { body } = parseEngram(raw);
         const embedding = await embedder.embed(body);
         await chroma.upsert(
-          { id: e.id!, content: body, title: e.title, date: e.date, filename: e.filename, vaultPath: vault.root, type: e.type },
+          { id: e.id!, content: body, title: e.title, date: e.date, filename: e.filename, vaultPath: vault.root, abstract: e.abstract, type: e.type },
           embedding
         );
         logger.info(`[engram] Re-indexed: ${e.filename} [${e.id}]`);
@@ -245,17 +246,36 @@ function createSession(): Session {
   // ── Tool: update_engram ─────────────────────────────────────────────────────
   server.tool(
     "update_engram",
-    "Add tags or wikilinks to an existing Engram without changing its content or re-embedding it.",
+    "Update an existing Engram in-place. Supports: setAbstract (replace abstract in frontmatter, synced to ChromaDB), setContent (replace body and re-embed), addTags (merge with existing), addWikilinks (add by UUID).",
     UpdateEngramInput.shape,
     async (input) => {
       const { id } = input as z.infer<typeof UpdateEngramInput>;
       logger.info(`[tool] update_engram: ${id}`);
       try {
-        const result = await updateEngram(input as z.infer<typeof UpdateEngramInput>, vault, vaultIndex, chroma);
+        const result = await updateEngram(input as z.infer<typeof UpdateEngramInput>, vault, vaultIndex, chroma, embedder);
         logger.info(`[tool] update_engram: ${result.message}`);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
         logger.error(`[tool] update_engram failed`, { err });
+        throw err;
+      }
+    }
+  );
+
+  // ── Tool: delete_engram ─────────────────────────────────────────────────────
+  server.tool(
+    "delete_engram",
+    "Permanently delete an Engram — removes the vault file and its ChromaDB entry. This cannot be undone.",
+    DeleteEngramInput.shape,
+    async (input) => {
+      const { id } = input as z.infer<typeof DeleteEngramInput>;
+      logger.info(`[tool] delete_engram: ${id}`);
+      try {
+        const result = await deleteEngram(input as z.infer<typeof DeleteEngramInput>, vault, vaultIndex, chroma);
+        logger.info(`[tool] delete_engram: ${result.message}`);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        logger.error(`[tool] delete_engram failed`, { err });
         throw err;
       }
     }

@@ -15,16 +15,18 @@ export const ListEngramsInput = z.object({
     })
     .optional(),
   limit: z.number().int().min(1).max(200).default(50),
+  offset: z.number().int().min(0).default(0).describe("Number of engrams to skip (for pagination)"),
 });
 
 export type ListEngramsInput = z.infer<typeof ListEngramsInput>;
 
 export function listEngrams(input: ListEngramsInput, vault: Vault) {
   const all = vault.listEngrams(input.date_range);
-  const limited = all.slice(0, input.limit);
+  const offset = input.offset ?? 0;
+  const page = all.slice(offset, offset + input.limit);
 
   return {
-    engrams: limited.map((e) => ({
+    engrams: page.map((e) => ({
       ...(e.id ? { id: e.id } : {}),
       date: e.date,
       filename: e.filename,
@@ -33,6 +35,7 @@ export function listEngrams(input: ListEngramsInput, vault: Vault) {
       ...(e.type ? { type: e.type } : {}),
     })),
     total: all.length,
-    returned: limited.length,
+    returned: page.length,
+    offset,
   };
 }

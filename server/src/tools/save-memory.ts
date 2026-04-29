@@ -55,6 +55,7 @@ export async function saveMemory(
       date,
       filename,
       vaultPath: vault.root,
+      abstract: input.abstract,
       type: input.type,
     },
     embedding

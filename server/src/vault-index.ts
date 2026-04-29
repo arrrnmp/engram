@@ -52,6 +52,10 @@ export class VaultIndex {
     return null;
   }
 
+  remove(id: string): void {
+    this.map.delete(id);
+  }
+
   entries(): IterableIterator<[string, Location]> {
     return this.map.entries();
   }

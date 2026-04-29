@@ -172,6 +172,14 @@ export function parseEngram(raw: string): ParsedEngram {
   };
 }
 
+/** Extract vault paths from the ## Related Memories section (e.g. ["2026-04-28/Some Title"]). */
+export function extractWikilinks(raw: string): string[] {
+  const idx = raw.indexOf("## Related Memories");
+  if (idx < 0) return [];
+  const section = raw.slice(idx);
+  return [...section.matchAll(/\[\[([^\]]+)\]\]/g)].map((m) => m[1]);
+}
+
 export function updateEngramWikilinks(
   existing: string,
   newLinks: string[]

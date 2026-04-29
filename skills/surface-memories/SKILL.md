@@ -20,6 +20,7 @@ A relevant topic has come up that may have saved context in Engram. Search for i
 2. **Call `search_memory`** with each query (n_results: 3). Run them in parallel if possible.
 
 3. **Evaluate the results**:
+   - Discard any result with `type: "summary"` or `type: "contradiction"` — these are meta-engrams written by `/dilucidate`, not primary sources. Use the source engrams they reference instead.
    - If similarity scores are high (≥ 0.75) and the content is clearly relevant: incorporate the context silently and continue the conversation informed by it. Do not announce that you searched.
    - If results are marginal or off-topic: discard them. Do not mention that you searched or found nothing.
    - If a result directly contradicts something being discussed (e.g., a past decision that conflicts with what's being proposed): briefly surface it — "Worth noting: there's a saved note that says X — still the direction?" — then continue.
