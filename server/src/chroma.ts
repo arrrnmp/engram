@@ -116,6 +116,34 @@ export class EngramChroma {
     const result = await this.col.get({ include: [] as any });
     return result.ids ?? [];
   }
+
+  async getAllWithEmbeddings(dateRange?: { from?: string; to?: string }): Promise<Array<{
+    id: string;
+    embedding: number[];
+    date: string;
+    filename: string;
+    title: string;
+  }>> {
+    const where = buildWhere(dateRange);
+    const results = await this.col.get({
+      ...(where ? { where } : {}),
+      include: ["embeddings", "metadatas"] as any,
+    });
+
+    const ids = results.ids ?? [];
+    const embeddings: number[][] = (results as any).embeddings ?? [];
+    const metadatas = results.metadatas ?? [];
+
+    return ids
+      .map((id, i) => ({
+        id,
+        embedding: embeddings[i] ?? [],
+        date: (metadatas[i]?.date as string) ?? "",
+        filename: (metadatas[i]?.filename as string) ?? "",
+        title: (metadatas[i]?.title as string) ?? id,
+      }))
+      .filter((item) => item.embedding.length > 0);
+  }
 }
 
 function buildWhere(

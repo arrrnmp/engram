@@ -1,0 +1,193 @@
+---
+name: dilucidate
+description: Weekly memory graph analysis. Links related memories, flags contradictions, compresses clusters into summaries, backfills tags, and surfaces decaying memories. Run when the user invokes /dilucidate.
+disable-model-invocation: true
+user-invocable: true
+effort: high
+---
+
+# /dilucidate — Memory Graph Analysis
+
+Run a two-phase pipeline: **Analyze** (read-only) then **Act** (write), with a user approval gate between them.
+
+Always write all output — engram content, summaries, tags, reports — in **English**.
+
+---
+
+## Phase 1: Analyze (read-only)
+
+### Step 1 — Early exit check
+
+Call `get_dilucidate_meta`. If it returns a non-null `meta`:
+- Get the current engram count via `list_engrams`
+- If `currentCount - meta.engramCountAtLastRun < 5`, tell the user:
+  ```
+  Only N new memories since last dilucidation (YYYY-MM-DD).
+  Come back when you have at least 5 new memories.
+  ```
+  Then stop.
+
+If `meta` is null, this is the first run — proceed regardless.
+
+### Step 2 — Semantic clustering
+
+Call `cluster_memories` with:
+- `threshold: 0.72` (default)
+- `minSize: 3`
+- `since`: the `lastRun` date from meta (or omit for first run)
+
+Note the clusters and `missingLinks` within each cluster.
+
+### Step 3 — Contradiction detection
+
+For each cluster with 3+ engrams:
+1. Call `read_engram` for each engram in the cluster
+2. Analyze whether any two engrams contain opposing conclusions, decisions, or recommendations
+3. Two engrams contradict if they recommend different approaches to the same problem, or if a later one reverses an earlier decision without acknowledging it
+4. Record each contradiction as `{ engramA: UUID, engramB: UUID, summary: "one-line description" }`
+
+Note: a summary engram cannot contradict its own source engrams — skip those.
+
+### Step 4 — Summarization candidates
+
+Clusters with 5+ engrams are candidates for summarization. For each:
+1. Read all engrams in the cluster
+2. Prepare a digest that captures the evolving thread — key decisions, changes of direction, current state
+
+### Step 5 — Tag audit
+
+Call `list_engrams`. For each engram where `tags` is absent or `[]`:
+1. Call `read_engram` to get the content
+2. Propose 2–4 relevant tags based on the content (e.g. `"psychology"`, `"career"`, `"relationships"`)
+
+### Step 6 — Decay scoring
+
+For each engram from `list_engrams`:
+
+```
+daysSinceDate = days between engram date and today
+recencyScore = 1 / (1 + daysSinceDate / 30)
+```
+
+Read the engram to count wikilinks in its `## Related Memories` section. Let `maxLinks` be the highest link count across all engrams.
+
+```
+connectivityScore = linkCount / max(maxLinks, 1)
+decayScore = 1 - (0.6 * recencyScore + 0.4 * connectivityScore)
+```
+
+Flag:
+- **Orphans**: decayScore > 0.8 AND linkCount = 0 AND daysSinceDate > 30
+- **Stale**: decayScore > 0.7 AND daysSinceDate > 60
+
+These are informational only — never auto-delete.
+
+### Step 7 — Present report and wait for approval
+
+Present the report in this format:
+
+```
+╭─ Dilucidation Report ─ YYYY-MM-DD ──────────────────────────╮
+│                                                              │
+│ New memories since last run: N                               │
+│                                                              │
+│ CLUSTERS (N found)                                           │
+│ ├─ "Theme" — N engrams, N missing links                      │
+│ └─ "Theme" — N engrams, summary candidate                    │
+│                                                              │
+│ CONTRADICTIONS (N found)                                     │
+│ └─ "Summary" (date A) ↔ (date B)                            │
+│                                                              │
+│ SUMMARIES (N candidates)                                     │
+│ └─ "Theme" cluster → N engrams → 1 summary                  │
+│                                                              │
+│ TAGS (N engrams with empty tags)                             │
+│                                                              │
+│ DECAY                                                        │
+│ ├─ N orphans (>30d, 0 links): "title", ...                   │
+│ └─ N stale engrams                                           │
+│                                                              │
+│ PROPOSED ACTIONS                                             │
+│ 1. Create N wikilinks across N clusters                      │
+│ 2. Save N contradiction engrams                              │
+│ 3. Save N summary engrams                                    │
+│ 4. Backfill tags for N engrams                               │
+│                                                              │
+│ Proceed? [y / n / specify which steps to skip]              │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+**Wait for explicit user approval before proceeding to Phase 2.**
+
+---
+
+## Phase 2: Act (write, only after approval)
+
+### Step 8 — Create missing wikilinks
+
+For each `missingLink` from the cluster output:
+- Call `update_engram` with `id: link.from, addWikilinks: [link.to]`
+- Call `update_engram` with `id: link.to, addWikilinks: [link.from]`
+
+### Step 9 — Save contradiction engrams
+
+For each detected contradiction, call `save_memory` with:
+- `type: "contradiction"`
+- `title`: the contradiction summary (e.g. "Auth strategy: JWT vs session cookies")
+- `content`: a markdown body with both sides clearly stated:
+
+```markdown
+## Conflicting Positions
+
+**Position A** — [[date/filename-of-engram-A]]
+Summary of what engram A says.
+
+**Position B** — [[date/filename-of-engram-B]]
+Summary of what engram B says.
+
+These positions conflict. One needs to be resolved or superseded.
+```
+
+The wikilink engine will automatically link back to both referenced engrams.
+
+### Step 10 — Save summary engrams
+
+For each summarization candidate, call `save_memory` with:
+- `type: "summary"`
+- `title`: cluster theme + " — Summary" (e.g. "Psychological Architecture — Summary")
+- `content`: the digest prepared in Step 4, written in English, third person
+
+### Step 11 — Backfill tags
+
+For each engram with proposed tags:
+- Call `update_engram` with `id: engramId, addTags: [proposed, tags]`
+
+### Step 12 — Update metadata
+
+Build the updated meta JSON and call `update_dilucidate_meta`:
+
+```json
+{
+  "lastRun": "<ISO timestamp>",
+  "engramCountAtLastRun": <current total>,
+  "stats": {
+    "wikilinksCreated": N,
+    "contradictionsFound": N,
+    "summariesWritten": N,
+    "tagsBackfilled": N,
+    "orphansFlagged": N
+  },
+  "history": [<previous history entries>, <new entry for this run>]
+}
+```
+
+### Step 13 — Print final summary
+
+```
+Dilucidation complete:
+- N wikilinks created
+- N contradictions saved
+- N summaries written
+- N engrams tagged
+- N orphans flagged (not deleted — review manually)
+```

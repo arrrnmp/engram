@@ -11,6 +11,9 @@ import { searchMemory, SearchMemoryInput } from "./tools/search-memory.js";
 import { getImportantContext, updateImportantContext, UpdateContextInput } from "./tools/context.js";
 import { listEngrams, ListEngramsInput } from "./tools/list-engrams.js";
 import { readEngram, ReadEngramInput } from "./tools/read-engram.js";
+import { updateEngram, UpdateEngramInput } from "./tools/update-engram.js";
+import { clusterMemoriesTool, ClusterMemoriesInput } from "./tools/dilucidate/cluster.js";
+import { getDilucidateMeta, updateDilucidateMeta, UpdateDilucidateMetaInput } from "./tools/dilucidate-meta.js";
 import { logger } from "./logger.js";
 
 // ── Startup ───────────────────────────────────────────────────────────────────
@@ -234,6 +237,77 @@ function createSession(): Session {
         return { content: [{ type: "text", text: result.content }] };
       } catch (err) {
         logger.error(`[tool] read_engram failed`, { err });
+        throw err;
+      }
+    }
+  );
+
+  // ── Tool: update_engram ─────────────────────────────────────────────────────
+  server.tool(
+    "update_engram",
+    "Add tags or wikilinks to an existing Engram without changing its content or re-embedding it.",
+    UpdateEngramInput.shape,
+    async (input) => {
+      const { id } = input as z.infer<typeof UpdateEngramInput>;
+      logger.info(`[tool] update_engram: ${id}`);
+      try {
+        const result = await updateEngram(input as z.infer<typeof UpdateEngramInput>, vault, vaultIndex, chroma);
+        logger.info(`[tool] update_engram: ${result.message}`);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        logger.error(`[tool] update_engram failed`, { err });
+        throw err;
+      }
+    }
+  );
+
+  // ── Tool: cluster_memories ──────────────────────────────────────────────────
+  server.tool(
+    "cluster_memories",
+    "Compute semantic clusters across all saved Engrams. Returns groups of related memories, missing wikilinks within each cluster, and average similarity scores. Used by /dilucidate for graph analysis.",
+    ClusterMemoriesInput.shape,
+    async (input) => {
+      logger.info(`[tool] cluster_memories: threshold=${(input as any).threshold ?? 0.72}, minSize=${(input as any).minSize ?? 3}`);
+      try {
+        const result = await clusterMemoriesTool(input as z.infer<typeof ClusterMemoriesInput>, chroma, vault, vaultIndex);
+        logger.info(`[tool] cluster_memories: ${result.totalClusters} clusters, ${result.totalEngrams} engrams`);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        logger.error(`[tool] cluster_memories failed`, { err });
+        throw err;
+      }
+    }
+  );
+
+  // ── Tool: get_dilucidate_meta ───────────────────────────────────────────────
+  server.tool(
+    "get_dilucidate_meta",
+    "Read .dilucidate-meta.json from the vault root. Returns null if no dilucidate run has been recorded yet.",
+    {},
+    async () => {
+      logger.info(`[tool] get_dilucidate_meta`);
+      try {
+        const result = getDilucidateMeta(vault);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        logger.error(`[tool] get_dilucidate_meta failed`, { err });
+        throw err;
+      }
+    }
+  );
+
+  // ── Tool: update_dilucidate_meta ────────────────────────────────────────────
+  server.tool(
+    "update_dilucidate_meta",
+    "Write updated .dilucidate-meta.json to the vault root. Used by /dilucidate to record run timestamps and stats.",
+    UpdateDilucidateMetaInput.shape,
+    async (input) => {
+      logger.info(`[tool] update_dilucidate_meta`);
+      try {
+        const result = updateDilucidateMeta(input as z.infer<typeof UpdateDilucidateMetaInput>, vault);
+        return { content: [{ type: "text", text: result.message }] };
+      } catch (err) {
+        logger.error(`[tool] update_dilucidate_meta failed`, { err });
         throw err;
       }
     }
