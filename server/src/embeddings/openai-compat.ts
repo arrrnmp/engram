@@ -1,7 +1,7 @@
 /**
  * OpenAI-compatible embedding provider.
- * Used for MLX (mlx-lm server) and NVIDIA (vLLM) — both expose the same
- * /v1/embeddings endpoint shape as the OpenAI API.
+ * Used for NVIDIA (vLLM) and OpenAI — both expose the same
+ * /v1/embeddings endpoint shape.
  */
 import type { EmbeddingProvider } from "./types.js";
 

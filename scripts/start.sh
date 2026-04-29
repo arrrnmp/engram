@@ -21,11 +21,11 @@ fi
 if lsof -ti:"$CHROMA_PORT" &>/dev/null; then
   echo "[engram] ChromaDB already running on port $CHROMA_PORT"
 else
-  echo "[engram] Starting ChromaDB on port $CHROMA_PORT..."
-  (cd "$ROOT" && uv run chroma run --port "$CHROMA_PORT" --path "$ROOT/.chroma-data") &
-  CHROMA_PID=$!
-  echo "[engram] ChromaDB PID: $CHROMA_PID"
-  sleep 2
+    echo "[engram] Starting ChromaDB on port $CHROMA_PORT..."
+    (cd "$ROOT" && uv run chroma run --host 0.0.0.0 --port "$CHROMA_PORT" --path "$ROOT/.chroma-data") &
+    CHROMA_PID=$!
+    echo "[engram] ChromaDB PID: $CHROMA_PID"
+    sleep 2
 fi
 
 # ── Engram MCP server ─────────────────────────────────────────────────────────

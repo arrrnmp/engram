@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
 
-const EmbeddingProviderSchema = z.enum(["auto", "ollama", "mlx", "nvidia", "openai"]);
+const EmbeddingProviderSchema = z.enum(["auto", "ollama", "nvidia", "openai"]);
 
 const ConfigSchema = z.object({
   vault: z.object({
@@ -35,9 +35,6 @@ const ConfigSchema = z.object({
       overheadBuffer: z.number().min(0.1).max(0.5).default(0.25),
       ollama: z
         .object({ host: z.string().url().default("http://localhost:11434") })
-        .default({}),
-      mlx: z
-        .object({ host: z.string().url().default("http://localhost:8080") })
         .default({}),
       nvidia: z
         .object({ host: z.string().url().default("http://localhost:8001") })

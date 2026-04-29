@@ -49,22 +49,9 @@ export async function createEmbeddingProvider(
   let effectiveProvider = embedding.provider;
 
   if (effectiveProvider === "auto") {
-    if (hw.platform === "apple-silicon") effectiveProvider = "mlx";
+    if (hw.platform === "apple-silicon") effectiveProvider = "ollama";
     else if (hw.platform === "nvidia-blackwell") effectiveProvider = "nvidia";
     else effectiveProvider = "ollama";
-  }
-
-  if (effectiveProvider === "mlx") {
-    if (await isReachable(`${embedding.mlx.host}/health`)) {
-      logger.info(`[embeddings] Using MLX server at ${embedding.mlx.host}`);
-      return new OpenAICompatProvider(
-        embedding.mlx.host,
-        variant.mlxTag,
-        "mlx"
-      );
-    }
-    logger.warn(`[embeddings] MLX server not reachable at ${embedding.mlx.host}, falling back to Ollama (Metal acceleration on Apple Silicon)`);
-    effectiveProvider = "ollama";
   }
 
   if (effectiveProvider === "nvidia") {

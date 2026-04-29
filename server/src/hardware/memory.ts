@@ -4,7 +4,6 @@ export interface ModelVariant {
   bits: number;
   vramGB: number;
   ollamaTag: string;
-  mlxTag: string;
   nvfp4Tag?: string;
 }
 
@@ -16,7 +15,6 @@ export const MODEL_VARIANTS: ModelVariant[] = [
     bits: 8,
     vramGB: 8.5,
     ollamaTag: "qwen3-embedding:8b-q8_0",
-    mlxTag: "mlx-community/Qwen3-Embedding-8B-8bit",
   },
   {
     modelSize: "8b",
@@ -24,7 +22,6 @@ export const MODEL_VARIANTS: ModelVariant[] = [
     bits: 6,
     vramGB: 6.5,
     ollamaTag: "qwen3-embedding:8b-q6_k",
-    mlxTag: "mlx-community/Qwen3-Embedding-8B-6bit",
   },
   {
     modelSize: "8b",
@@ -32,7 +29,6 @@ export const MODEL_VARIANTS: ModelVariant[] = [
     bits: 4.5,
     vramGB: 4.7,
     ollamaTag: "qwen3-embedding:8b-q4_k_m",
-    mlxTag: "mlx-community/Qwen3-Embedding-8B-4bit",
     nvfp4Tag: "Qwen/Qwen3-Embedding-8B-NVFP4",
   },
   {
@@ -41,7 +37,6 @@ export const MODEL_VARIANTS: ModelVariant[] = [
     bits: 8,
     vramGB: 4.5,
     ollamaTag: "qwen3-embedding:4b-q8_0",
-    mlxTag: "mlx-community/Qwen3-Embedding-4B-8bit",
   },
   {
     modelSize: "4b",
@@ -49,7 +44,6 @@ export const MODEL_VARIANTS: ModelVariant[] = [
     bits: 6,
     vramGB: 3.5,
     ollamaTag: "qwen3-embedding:4b-q6_k",
-    mlxTag: "mlx-community/Qwen3-Embedding-4B-6bit",
   },
   {
     modelSize: "4b",
@@ -57,7 +51,6 @@ export const MODEL_VARIANTS: ModelVariant[] = [
     bits: 4.5,
     vramGB: 2.5,
     ollamaTag: "qwen3-embedding:4b-q4_k_m",
-    mlxTag: "mlx-community/Qwen3-Embedding-4B-4bit",
     nvfp4Tag: "Qwen/Qwen3-Embedding-4B-NVFP4",
   },
 ];

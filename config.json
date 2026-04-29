@@ -22,9 +22,6 @@
     "ollama": {
       "host": "http://localhost:11434"
     },
-    "mlx": {
-      "host": "http://localhost:8080"
-    },
     "nvidia": {
       "host": "http://localhost:8001"
     }
