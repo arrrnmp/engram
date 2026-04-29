@@ -7,14 +7,14 @@ Provider-agnostic AI memory database. Conversations are saved as dated markdown 
 ```
 Obsidian Vault (YYYY-MM-DD/title.md)
        ↕ read/write
-  Engram MCP Server (Bun, HTTP, port 7384)
+  Engram MCP Server (Bun, HTTP/HTTPS, port 7384)
        ↕ embed / search
     ChromaDB (port 8000)
        ↑
-  Embedding Model (Qwen3-Embedding via Ollama / MLX / NVIDIA / OpenAI)
+  Embedding Model (Qwen3-Embedding via Ollama / NVIDIA vLLM / OpenAI)
 ```
 
-**Skills** (`/save-memory`, `/prefill`, `/update-important-memory`) are user-invokable only — the model never runs them automatically.
+**Skills** (`/save-memory`, `/prefill`, `/update-important-memory`) are user-invokable only — the model never runs them automatically. `surface-memories` is agent-only and auto-triggered.
 
 ## Setup
 
@@ -79,7 +79,17 @@ For OpenAI embeddings (no local runtime needed):
 
 ### 4. Connect your agent
 
-Add to your MCP client config:
+The setup script auto-registers Engram's MCP endpoint and installs skills for all detected agent tools. Supported:
+
+| Agent | How it's registered |
+|---|---|
+| Claude Code | `~/.claude.json` (HTTP MCP) |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (stdio via `mcp-remote`) |
+| Cursor | `~/.cursor/mcp.json` |
+| OpenCode | `~/.config/opencode/opencode.json` |
+| GitHub Copilot CLI | `~/.copilot/mcp-config.json` |
+
+For other MCP clients, add manually:
 
 ```json
 {
@@ -91,17 +101,14 @@ Add to your MCP client config:
 }
 ```
 
-### 5. Install skills
-
-Copy the `skills/` directory to your agent's skills folder, or install via the agentskills registry.
-
 ## Skills
 
 | Skill | Invoke | What it does |
 |---|---|---|
-| `save-memory` | `/save-memory` | Saves the conversation as an Engram with wikilinks |
+| `save-memory` | `/save-memory` | Saves the conversation as Engrams with wikilinks |
 | `prefill` | `/prefill` | Loads IMPORTANT.md into context |
 | `update-important-memory` | `/update-important-memory` | Reviews all Engrams and rewrites IMPORTANT.md |
+| `surface-memories` | *(auto-triggered)* | Silently searches for relevant context when a conversation touches a known topic |
 
 ## MCP Tools
 
@@ -110,10 +117,11 @@ The server exposes these tools directly (used by skills internally):
 | Tool | Description |
 |---|---|
 | `save_memory` | Write an Engram, embed it, generate wikilinks |
-| `search_memory` | Semantic search across all Engrams |
+| `search_memory` | Semantic search across all Engrams (filterable by date range and type) |
 | `get_important_context` | Read IMPORTANT.md |
 | `update_important_context` | Write IMPORTANT.md |
 | `list_engrams` | List Engrams by date range |
+| `read_engram` | Read the full content of a specific Engram by ID |
 
 ## Embedding Providers
 
@@ -121,7 +129,7 @@ The server auto-detects the best provider for your hardware:
 
 | Hardware | Provider | Model |
 |---|---|---|
-| Apple Silicon | MLX server → Ollama+Metal fallback | Qwen3-Embedding |
+| Apple Silicon | Ollama (Metal acceleration) | Qwen3-Embedding |
 | NVIDIA Blackwell (CC ≥ 10.0) | vLLM NVFP4 → Ollama CUDA fallback | Qwen3-Embedding |
 | NVIDIA older / CPU | Ollama | Qwen3-Embedding |
 | Override | OpenAI API | text-embedding-3-small/large |
@@ -134,9 +142,9 @@ The server auto-detects the best provider for your hardware:
 ~/Documents/my-engram-vault/
 ├── IMPORTANT.md              ← persistent user profile
 ├── 2026-04-26/
-│   └── engram-project-goals.md
+│   └── Engram project goals.md
 ├── 2026-04-25/
-│   └── typescript-preferences.md
+│   └── TypeScript preferences.md
 └── ...
 ```
 
