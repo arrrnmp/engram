@@ -388,6 +388,7 @@ const TOOLS: ToolDef[] = [
 ];
 
 const RERUN = process.argv.includes("--rerun");
+const SKILLS_ONLY = process.argv.includes("--skills-only");
 
 function installSkills(destDir: string): { installed: string[]; skipped: string[] } {
   mkdirSync(destDir, { recursive: true });
@@ -458,8 +459,124 @@ function row(icon: string, msg: string, detail?: string): void {
   console.log(`  ${icon} ${msg}${d}`);
 }
 
+// ── Skills & MCP only (used by --skills-only) ────────────────────────────────
+
+function installSkillsAndMcp(): string[] {
+  const issues: string[] = [];
+
+  const cfgRaw = loadRawConfig() as any;
+  const mcpPort: number = cfgRaw?.server?.port ?? 7384;
+  const httpsEnabled = cfgRaw?.server?.https
+    && existsSync(CERT_FILE)
+    && existsSync(KEY_FILE);
+  const mcpUrl = httpsEnabled
+    ? `https://localhost:${mcpPort}/mcp`
+    : `http://localhost:${mcpPort}/mcp`;
+
+  row(arrow, `MCP endpoint: ${c.bold}${mcpUrl}${c.reset}`);
+
+  for (const tool of TOOLS) {
+    if (!tool.installed()) {
+      row(c.dim + "–" + c.reset, `${tool.label} — not installed, skipping`);
+      continue;
+    }
+
+    const toolLabel = `${c.bold}${tool.label}${c.reset}`;
+    let toolOk = true;
+
+    if (tool.skillsDir) {
+      try {
+        const { installed, skipped } = installSkills(tool.skillsDir);
+        if (installed.length > 0) {
+          row(ok, `${toolLabel} — skills installed: ${installed.join(", ")}`);
+        } else if (skipped.length > 0) {
+          row(ok, `${toolLabel} — skills already present`);
+        }
+      } catch (e) {
+        row(fail, `${toolLabel} — skills install failed: ${(e as Error).message}`);
+        toolOk = false;
+      }
+    }
+
+    if (tool.mcpConfig) {
+      try {
+        const result = tool.upsertMcp
+          ? tool.upsertMcp(mcpUrl)
+          : upsertMcpConfig(tool.mcpConfig, mcpUrl);
+        if (result === "added") {
+          row(ok, `${toolLabel} — MCP registered in ${tool.mcpConfig}`);
+        } else if (result === "updated") {
+          row(ok, `${toolLabel} — MCP URL updated in ${tool.mcpConfig}`);
+        } else {
+          row(ok, `${toolLabel} — MCP already configured`);
+        }
+      } catch (e) {
+        row(fail, `${toolLabel} — MCP config failed: ${(e as Error).message}`);
+        toolOk = false;
+      }
+    }
+
+    if (!toolOk) {
+      issues.push(`Manually configure ${tool.label} — see README for MCP and skills paths`);
+    }
+  }
+
+  // Skill packages
+  const DIST_DIR = join(ROOT, "dist");
+  mkdirSync(DIST_DIR, { recursive: true });
+
+  if (IS_WIN) {
+    row(warn, "Skill packaging requires the zip command — skipping on Windows");
+    row(arrow, `Manually zip each folder in ${SKILLS_SRC} and rename to .skill`);
+  } else {
+    const skillDirs = readdirSync(SKILLS_SRC).filter((s) =>
+      statSync(join(SKILLS_SRC, s)).isDirectory()
+    );
+
+    let packaged = 0;
+    for (const skill of skillDirs) {
+      const outFile = join(DIST_DIR, `${skill}.skill`);
+      const result = spawnSync("zip", ["-r", outFile, skill], {
+        cwd: SKILLS_SRC,
+        stdio: "pipe",
+      });
+      if (result.status === 0) {
+        row(ok, `${skill}.skill`);
+        packaged++;
+      } else {
+        row(fail, `Failed to package ${skill}`);
+      }
+    }
+
+    if (packaged > 0) {
+      row(arrow, `Skill files written to: ${c.bold}${DIST_DIR}${c.reset}`);
+      row(arrow, `Double-click a ${c.bold}.skill${c.reset} file to install it in Claude Desktop or Claude.ai`);
+    }
+  }
+
+  return issues;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
+  // ── --skills-only: fast path ────────────────────────────────────────────────
+  if (SKILLS_ONLY) {
+    console.log(
+      `\n${c.bold}${c.cyan}Engram — Skills & MCP Reinstall${c.reset}\n`
+    );
+    const issues = installSkillsAndMcp();
+    rl.close();
+    if (issues.length === 0) {
+      console.log(`\n  ${ok} ${c.bold}${c.green}Done.${c.reset}\n`);
+    } else {
+      console.log(`\n  ${warn} ${issues.length} issue(s):`);
+      issues.forEach((issue, i) => console.log(`  ${i + 1}. ${issue}`));
+      console.log();
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   console.log(
     `\n${c.bold}${c.cyan}╔══════════════════════════════════╗${c.reset}`
   );
@@ -737,99 +854,7 @@ async function main(): Promise<void> {
 
   // ── 8. Tool integration (skills + MCP) ───────────────────────────────────────
   section("Agent tool integration");
-
-  const cfgFinal = loadRawConfig() as any;
-  const mcpPort: number = cfgFinal?.server?.port ?? 7384;
-  const mcpUrl = httpsEnabled
-    ? `https://localhost:${mcpPort}/mcp`
-    : `http://localhost:${mcpPort}/mcp`;
-
-  row(arrow, `MCP endpoint: ${c.bold}${mcpUrl}${c.reset}`);
-
-  for (const tool of TOOLS) {
-    if (!tool.installed()) {
-      row(c.dim + "–" + c.reset, `${tool.label} — not installed, skipping`);
-      continue;
-    }
-
-    const toolLabel = `${c.bold}${tool.label}${c.reset}`;
-    let toolOk = true;
-
-    // Skills
-    if (tool.skillsDir) {
-      try {
-        const { installed, skipped } = installSkills(tool.skillsDir);
-        if (installed.length > 0) {
-          row(ok, `${toolLabel} — skills installed: ${installed.join(", ")}`);
-        } else if (skipped.length > 0) {
-          row(ok, `${toolLabel} — skills already present`);
-        }
-      } catch (e) {
-        row(fail, `${toolLabel} — skills install failed: ${(e as Error).message}`);
-        toolOk = false;
-      }
-    }
-
-    // MCP config
-    if (tool.mcpConfig) {
-      try {
-        const result = tool.upsertMcp
-          ? tool.upsertMcp(mcpUrl)
-          : upsertMcpConfig(tool.mcpConfig, mcpUrl);
-        if (result === "added") {
-          row(ok, `${toolLabel} — MCP registered in ${tool.mcpConfig}`);
-        } else if (result === "updated") {
-          row(ok, `${toolLabel} — MCP URL updated in ${tool.mcpConfig}`);
-        } else {
-          row(ok, `${toolLabel} — MCP already configured`);
-        }
-      } catch (e) {
-        row(fail, `${toolLabel} — MCP config failed: ${(e as Error).message}`);
-        toolOk = false;
-      }
-    }
-
-    if (!toolOk) {
-      issues.push(`Manually configure ${tool.label} — see README for MCP and skills paths`);
-    }
-  }
-
-  // ── 9. Skill packages (.skill files for Claude Desktop / Claude.ai) ──────────
-  section("Skill packages");
-
-  const DIST_DIR = join(ROOT, "dist");
-  mkdirSync(DIST_DIR, { recursive: true });
-
-  if (IS_WIN) {
-    row(warn, "Skill packaging requires the zip command — skipping on Windows");
-    row(arrow, `Manually zip each folder in ${SKILLS_SRC} and rename to .skill`);
-  } else {
-    const skillDirs = readdirSync(SKILLS_SRC).filter((s) =>
-      statSync(join(SKILLS_SRC, s)).isDirectory()
-    );
-
-    let packaged = 0;
-    for (const skill of skillDirs) {
-      const outFile = join(DIST_DIR, `${skill}.skill`);
-      // zip -r <outfile> <skill-folder> from inside skills/ so the archive
-      // root is the skill folder name — same structure as package_skill.py
-      const result = spawnSync("zip", ["-r", outFile, skill], {
-        cwd: SKILLS_SRC,
-        stdio: "pipe",
-      });
-      if (result.status === 0) {
-        row(ok, `${skill}.skill`);
-        packaged++;
-      } else {
-        row(fail, `Failed to package ${skill}`);
-      }
-    }
-
-    if (packaged > 0) {
-      row(arrow, `Skill files written to: ${c.bold}${DIST_DIR}${c.reset}`);
-      row(arrow, `Double-click a ${c.bold}.skill${c.reset} file to install it in Claude Desktop or Claude.ai`);
-    }
-  }
+  issues.push(...installSkillsAndMcp());
 
   // ── Summary ──────────────────────────────────────────────────────────────────
   rl.close();
@@ -844,8 +869,6 @@ async function main(): Promise<void> {
       ? "bun scripts/setup.ts && bun server/src/index.ts"
       : "./scripts/start.sh";
     console.log(`  ${c.bold}${c.cyan}${startCmd}${c.reset}`);
-    console.log(`\n  MCP endpoint: ${c.bold}${mcpUrl}${c.reset}`);
-    console.log(`  ${c.dim}(registered in all detected agent tool configs)${c.reset}`);
   } else {
     console.log(
       `  ${warn} ${c.bold}${c.yellow}${issues.length} issue${issues.length > 1 ? "s" : ""} to resolve:${c.reset}`
