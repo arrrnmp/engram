@@ -126,6 +126,8 @@ Proceed? [y / n / specify which steps to skip]
 
 ## Phase 2: Act (write, only after approval)
 
+Before writing any new engrams, call `get_vault_structure` once to understand the existing folder organization. Use the `folder` parameter when saving contradiction and synthesis engrams to place them in an appropriate location.
+
 ### Step 8 — Create missing wikilinks
 
 For each `missingLink` from the cluster output:
@@ -167,21 +169,18 @@ For each engram with proposed tags:
 
 ### Step 12 — Update metadata
 
-Build the updated meta JSON and call `update_dilucidate_meta`:
-
-```json
-{
-  "lastRun": "<ISO timestamp>",
-  "engramCountAtLastRun": <current total>,
-  "stats": {
-    "wikilinksCreated": N,
-    "contradictionsFound": N,
-    "summariesWritten": N,
-    "tagsBackfilled": N,
-    "orphansFlagged": N
-  },
-  "history": [<previous history entries>, <new entry for this run>]
+Call `update_dilucidate_meta` with:
+```
+lastRun: <ISO timestamp of now>
+engramCountAtLastRun: <current total engram count>
+stats: {
+  wikilinksCreated: <count from step 8>,
+  contradictionsFound: <count from step 9>,
+  summariesWritten: <count from step 10>,
+  tagsBackfilled: <count from step 11>,
+  orphansFlagged: <count from decay flags>
 }
+note: <optional — include if early exit or unusual findings>
 ```
 
 ### Step 13 — Print final summary

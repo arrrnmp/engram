@@ -22,6 +22,7 @@ describe("searchMemory", () => {
           title: "Test Result",
           date: "2026-04-29",
           filename: "test.md",
+          relativePath: "2026-04-29/test.md",
           excerpt: "Some excerpt",
           similarity: 0.92,
           abstract: "An abstract",
@@ -62,7 +63,7 @@ describe("searchMemory", () => {
     expect(capturedArgs.type).toBe("idea");
   });
 
-  test("passes n_results to chroma.search", async () => {
+  test("passes doubled n_results to chroma.search for merge headroom", async () => {
     let capturedN: number | undefined;
     const chroma = mockChroma();
     chroma.search = async (_emb, n, _dateRange?, _type?) => {
@@ -70,14 +71,14 @@ describe("searchMemory", () => {
       return [];
     };
 
-    await searchMemory(makeInput({ n_results: 3 }), chroma, mockEmbedder());
-    expect(capturedN).toBe(3);
+    await searchMemory(makeInput({ n_results: 3 }), chroma, mockEmbedder(), mockVault());
+    expect(capturedN).toBe(6); // doubled for merge headroom
   });
 
   test("rounds similarity to 3 decimal places", async () => {
     const chroma = mockChroma({
       searchResults: [
-        { id: "x", title: "T", date: "2026-04-29", filename: "t.md", excerpt: "E", similarity: 0.923456 },
+        { id: "x", title: "T", date: "2026-04-29", filename: "t.md", relativePath: "2026-04-29/t.md", excerpt: "E", similarity: 0.923456 },
       ],
     });
 
@@ -98,11 +99,12 @@ describe("searchMemory", () => {
 
     const cache = new LRUEmbeddingCache(64);
     const chroma = mockChroma({ searchResults: [] });
+    const vault = mockVault();
 
-    await searchMemory(makeInput({ query: "same query" }), chroma, embedder, cache);
+    await searchMemory(makeInput({ query: "same query" }), chroma, embedder, vault, cache);
     expect(embedCallCount).toBe(1);
 
-    await searchMemory(makeInput({ query: "same query" }), chroma, embedder, cache);
+    await searchMemory(makeInput({ query: "same query" }), chroma, embedder, vault, cache);
     expect(embedCallCount).toBe(1); // cache hit — no second embed call
   });
 
@@ -133,21 +135,22 @@ describe("searchMemory", () => {
 
     const cache = new LRUEmbeddingCache(64);
     const chroma = mockChroma({ searchResults: [] });
+    const vault = mockVault();
 
-    await searchMemory(makeInput({ query: "alpha" }), chroma, embedder, cache);
-    await searchMemory(makeInput({ query: "beta" }), chroma, embedder, cache);
+    await searchMemory(makeInput({ query: "alpha" }), chroma, embedder, vault, cache);
+    await searchMemory(makeInput({ query: "beta" }), chroma, embedder, vault, cache);
     expect(embedCallCount).toBe(2);
 
     // Both should be cached now
-    await searchMemory(makeInput({ query: "alpha" }), chroma, embedder, cache);
-    await searchMemory(makeInput({ query: "beta" }), chroma, embedder, cache);
+    await searchMemory(makeInput({ query: "alpha" }), chroma, embedder, vault, cache);
+    await searchMemory(makeInput({ query: "beta" }), chroma, embedder, vault, cache);
     expect(embedCallCount).toBe(2); // no new embed calls
   });
 
   test("includes abstract and type when present", async () => {
     const chroma = mockChroma({
       searchResults: [
-        { id: "x", title: "T", date: "2026-04-29", filename: "t.md", excerpt: "E", similarity: 0.9, abstract: "abs", type: "chat" },
+        { id: "x", title: "T", date: "2026-04-29", filename: "t.md", relativePath: "2026-04-29/t.md", excerpt: "E", similarity: 0.9, abstract: "abs", type: "chat" },
       ],
     });
 
@@ -159,7 +162,7 @@ describe("searchMemory", () => {
   test("omits abstract and type when absent", async () => {
     const chroma = mockChroma({
       searchResults: [
-        { id: "x", title: "T", date: "2026-04-29", filename: "t.md", excerpt: "E", similarity: 0.9 },
+        { id: "x", title: "T", date: "2026-04-29", filename: "t.md", relativePath: "2026-04-29/t.md", excerpt: "E", similarity: 0.9 },
       ],
     });
 

@@ -30,6 +30,7 @@ export function listEngrams(input: ListEngramsInput, vault: Vault) {
       ...(e.id ? { id: e.id } : {}),
       date: e.date,
       filename: e.filename,
+      relativePath: e.relativePath,
       title: e.title,
       ...(e.abstract ? { abstract: e.abstract } : {}),
       ...(e.type ? { type: e.type } : {}),

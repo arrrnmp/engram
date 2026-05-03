@@ -7,6 +7,7 @@ export interface KeywordResult {
   title: string;
   date: string;
   filename: string;
+  relativePath: string;
   score: number; // 0–1
   excerpt: string;
   abstract?: string;
@@ -48,7 +49,7 @@ export function keywordSearch(
 
     // ── Full body read (single read, used for both scoring and excerpt) ──────
     let raw: string;
-    try { raw = vault.readEngram(e.date, e.filename); } catch { continue; }
+    try { raw = vault.readEngram(e.relativePath); } catch { continue; }
 
     // Strip frontmatter: find the closing "---" after the opening fence.
     const fmEnd = raw.indexOf("\n---\n", 4);
@@ -82,6 +83,7 @@ export function keywordSearch(
       title: e.title,
       date: e.date,
       filename: e.filename,
+      relativePath: e.relativePath,
       score,
       excerpt,
       ...(e.abstract ? { abstract: e.abstract } : {}),

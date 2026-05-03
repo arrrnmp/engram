@@ -2,15 +2,31 @@
 /**
  * Cross-platform start script for Engram (macOS, Linux, Windows).
  * Equivalent to scripts/start.sh but runs via Bun on all platforms.
+ *
+ * Flags:
+ *   --re-embed      / -r    Force re-embedding of all vault files (markdown + media)
+ *   --re-embed-md           Force re-embedding of markdown files only
+ *   --re-embed-pdf          Force re-embedding of PDF/Office files only
  */
 import { existsSync } from "fs";
 import { join } from "path";
+import { ensureChromaRunning } from "./ensure-chroma.js";
+import { ensureEmbedServer } from "./ensure-embed-server.js";
+import { ensureOllama } from "./ensure-ollama.js";
 
 const ROOT = join(import.meta.dir, "..");
-const CHROMA_PORT = 8000;
 
 function log(msg: string) { console.log(`[engram] ${msg}`); }
 function die(msg: string): never { console.error(`[engram] ERROR: ${msg}`); process.exit(1); }
+
+const args = process.argv.slice(2);
+const reEmbed = args.includes("--re-embed") || args.includes("-r");
+const reEmbedMd = reEmbed || args.includes("--re-embed-md");
+const reEmbedPdf = reEmbed || args.includes("--re-embed-pdf");
+
+if (reEmbed) log("--re-embed flag set: will force re-embed all vault files on startup.");
+else if (reEmbedMd) log("--re-embed-md flag set: will force re-embed markdown files on startup.");
+else if (reEmbedPdf) log("--re-embed-pdf flag set: will force re-embed PDF/Office files on startup.");
 
 // ── uv ────────────────────────────────────────────────────────────────────────
 
@@ -27,37 +43,15 @@ if (!existsSync(join(ROOT, ".venv"))) {
 
 // ── ChromaDB ──────────────────────────────────────────────────────────────────
 
-async function isChromaRunning(): Promise<boolean> {
-  try {
-    const res = await fetch(`http://localhost:${CHROMA_PORT}/api/v2/heartbeat`, {
-      signal: AbortSignal.timeout(1000),
-    });
-    return res.ok;
-  } catch { return false; }
-}
+const chromaProc = await ensureChromaRunning(ROOT);
 
-if (await isChromaRunning()) {
-  log(`ChromaDB already running on port ${CHROMA_PORT}`);
-} else {
-  log(`Starting ChromaDB on port ${CHROMA_PORT}...`);
-  Bun.spawn(
-    ["uv", "run", "chroma", "run", "--host", "0.0.0.0", "--port", String(CHROMA_PORT), "--path", join(ROOT, ".chroma-data")],
-    {
-      cwd: ROOT,
-      stdout: "ignore",
-      stderr: "ignore",
-      env: { ...process.env, RUST_LOG: "warn" },
-    }
-  );
+// ── Embedding server ──────────┐────────────────────────────────────────────────
 
-  let ready = false;
-  for (let i = 0; i < 20; i++) {
-    await Bun.sleep(500);
-    if (await isChromaRunning()) { ready = true; break; }
-  }
-  if (!ready) die("ChromaDB failed to start within 10 seconds.");
-  log("ChromaDB ready.");
-}
+const embedProc = await ensureEmbedServer(ROOT);
+
+// ── Ollama (captioning) ─────────────────────────────────────────────────────────
+
+const ollamaProc = await ensureOllama(ROOT);
 
 // ── Server deps ───────────────────────────────────────────────────────────────
 
@@ -81,10 +75,23 @@ const server = Bun.spawn(["bun", "run", "src/index.ts"], {
   cwd: serverDir,
   stdout: "inherit",
   stderr: "inherit",
+  env: {
+    ...process.env,
+    ENGRAM_RE_EMBED_MD: reEmbedMd ? "1" : undefined,
+    ENGRAM_RE_EMBED_PDF: reEmbedPdf ? "1" : undefined,
+  },
 });
 
-process.on("SIGINT", () => { server.kill(); process.exit(0); });
-process.on("SIGTERM", () => { server.kill(); process.exit(0); });
+function shutdown() {
+  server.kill();
+  embedProc?.kill();
+  ollamaProc?.kill();
+  chromaProc?.kill();
+  process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);;
 
 const code = await server.exited;
 process.exit(code ?? 0);

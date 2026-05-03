@@ -9,8 +9,8 @@ describe("cosineSimilarity (via clustering)", () => {
     const vec = [1, 0, 0, 0];
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: vec, date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: vec, date: "2026-04-29", filename: "b.md", title: "B" },
+        { id: "a", embedding: vec, date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: vec, date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
       ],
     });
 
@@ -24,8 +24,8 @@ describe("cosineSimilarity (via clustering)", () => {
   test("orthogonal vectors do not cluster", async () => {
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: [1, 0, 0], date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: [0, 1, 0], date: "2026-04-29", filename: "b.md", title: "B" },
+        { id: "a", embedding: [1, 0, 0], date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: [0, 1, 0], date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
       ],
     });
 
@@ -36,8 +36,8 @@ describe("cosineSimilarity (via clustering)", () => {
   test("opposite vectors produce similarity ~-1.0", async () => {
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: [1, 0, 0], date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: [-1, 0, 0], date: "2026-04-29", filename: "b.md", title: "B" },
+        { id: "a", embedding: [1, 0, 0], date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: [-1, 0, 0], date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
       ],
     });
 
@@ -53,7 +53,7 @@ describe("clusterMemories", () => {
   test("returns empty for vault below minSize", async () => {
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: [1, 0], date: "2026-04-29", filename: "a.md", title: "A" },
+        { id: "a", embedding: [1, 0], date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
       ],
     });
 
@@ -74,9 +74,9 @@ describe("clusterMemories", () => {
     const base = [0.9, 0.1, 0.0];
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: base, date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: [0.85, 0.15, 0.0], date: "2026-04-29", filename: "b.md", title: "B" },
-        { id: "c", embedding: [0.88, 0.12, 0.0], date: "2026-04-29", filename: "c.md", title: "C" },
+        { id: "a", embedding: base, date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: [0.85, 0.15, 0.0], date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
+        { id: "c", embedding: [0.88, 0.12, 0.0], date: "2026-04-29", filename: "c.md", relativePath: "2026-04-29/c.md", title: "C" },
       ],
     });
 
@@ -89,13 +89,13 @@ describe("clusterMemories", () => {
     const chroma = mockChroma({
       allWithEmbeddings: [
         // Group 1: pointing along x-axis
-        { id: "a", embedding: [1, 0, 0], date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: [0.95, 0.05, 0], date: "2026-04-29", filename: "b.md", title: "B" },
-        { id: "c", embedding: [0.9, 0.1, 0], date: "2026-04-29", filename: "c.md", title: "C" },
+        { id: "a", embedding: [1, 0, 0], date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: [0.95, 0.05, 0], date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
+        { id: "c", embedding: [0.9, 0.1, 0], date: "2026-04-29", filename: "c.md", relativePath: "2026-04-29/c.md", title: "C" },
         // Group 2: pointing along y-axis
-        { id: "d", embedding: [0, 1, 0], date: "2026-04-29", filename: "d.md", title: "D" },
-        { id: "e", embedding: [0, 0.95, 0.05], date: "2026-04-29", filename: "e.md", title: "E" },
-        { id: "f", embedding: [0, 0.9, 0.1], date: "2026-04-29", filename: "f.md", title: "F" },
+        { id: "d", embedding: [0, 1, 0], date: "2026-04-29", filename: "d.md", relativePath: "2026-04-29/d.md", title: "D" },
+        { id: "e", embedding: [0, 0.95, 0.05], date: "2026-04-29", filename: "e.md", relativePath: "2026-04-29/e.md", title: "E" },
+        { id: "f", embedding: [0, 0.9, 0.1], date: "2026-04-29", filename: "f.md", relativePath: "2026-04-29/f.md", title: "F" },
       ],
     });
 
@@ -114,8 +114,8 @@ describe("clusterMemories", () => {
     // Two similar pairs but each only has 2 members — minSize=3 filters both
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: [1, 0], date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: [0.95, 0.05], date: "2026-04-29", filename: "b.md", title: "B" },
+        { id: "a", embedding: [1, 0], date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: [0.95, 0.05], date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
       ],
     });
 
@@ -132,16 +132,16 @@ describe("clusterMemories", () => {
     });
 
     const resolutions = new Map();
-    resolutions.set("a", { date: "2026-04-29", filename: "a.md" });
-    resolutions.set("b", { date: "2026-04-29", filename: "b.md" });
-    resolutions.set("c", { date: "2026-04-29", filename: "c.md" });
+    resolutions.set("a", { relativePath: "2026-04-29/a.md" });
+    resolutions.set("b", { relativePath: "2026-04-29/b.md" });
+    resolutions.set("c", { relativePath: "2026-04-29/c.md" });
     const vaultIndex = mockVaultIndex({ resolutions });
 
     const chroma = mockChroma({
       allWithEmbeddings: [
-        { id: "a", embedding: base, date: "2026-04-29", filename: "a.md", title: "A" },
-        { id: "b", embedding: [0.85, 0.15, 0.0], date: "2026-04-29", filename: "b.md", title: "B" },
-        { id: "c", embedding: [0.88, 0.12, 0.0], date: "2026-04-29", filename: "c.md", title: "C" },
+        { id: "a", embedding: base, date: "2026-04-29", filename: "a.md", relativePath: "2026-04-29/a.md", title: "A" },
+        { id: "b", embedding: [0.85, 0.15, 0.0], date: "2026-04-29", filename: "b.md", relativePath: "2026-04-29/b.md", title: "B" },
+        { id: "c", embedding: [0.88, 0.12, 0.0], date: "2026-04-29", filename: "c.md", relativePath: "2026-04-29/c.md", title: "C" },
       ],
     });
 

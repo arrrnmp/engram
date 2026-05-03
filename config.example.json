@@ -17,17 +17,20 @@
     "maxLinks": 5
   },
   "embedding": {
-    "provider": "auto",
     "overheadBuffer": 0.25,
-    "ollama": {
-      "host": "http://localhost:11434"
-    },
-    "nvidia": {
-      "host": "http://localhost:8001"
-    },
-    "openai": {
-      "apiKey": "sk-...",
-      "model": "text-embedding-3-small"
+    "vllm": {
+      "host": "http://localhost:8001",
+      "healthTimeout": 2000
     }
+  },
+  "watcher": {
+    "enabled": true,
+    "pdfChunkPages": 6
+  },
+  "captioning": {
+    "provider": "ollama",
+    "host": "http://localhost:11434/v1",
+    "model": "engram-caption",
+    "prompt": "Describe this image concisely for search and retrieval."
   }
 }

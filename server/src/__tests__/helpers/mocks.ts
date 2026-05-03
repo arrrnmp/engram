@@ -7,11 +7,21 @@ import type { EngramChroma, SearchResult } from "../chroma.js";
 
 export function mockEmbedder(overrides?: Partial<EmbeddingProvider>): EmbeddingProvider {
   return {
-    embed: async () => Array(4096).fill(0.01),
-    embedBatch: async (texts: string[]) => texts.map(() => Array(4096).fill(0.01)),
+    embed: async (_text: string, _options?: { taskInstruction?: string }) => Array(4096).fill(0.01),
+    embedBatch: async (texts: string[], _options?: { taskInstruction?: string }) => texts.map(() => Array(4096).fill(0.01)),
     modelInfo: () => ({ provider: "test", model: "test-model" }),
+    expectedDimensions: () => 4096,
+    capabilities: () => ({ text: true, images: false, video: false, pdf: false, documents: false }),
     ...overrides,
   };
+}
+
+/** Like mockEmbedder but with full multimodal capabilities (images, video, pdf). */
+export function mockEmbedderWithImages(overrides?: Partial<EmbeddingProvider>): EmbeddingProvider {
+  return mockEmbedder({
+    capabilities: () => ({ text: true, images: true, video: true, pdf: true, documents: true }),
+    ...overrides,
+  });
 }
 
 // ── EngramChroma mock ───────────────────────────────────────────────────────
@@ -19,7 +29,7 @@ export function mockEmbedder(overrides?: Partial<EmbeddingProvider>): EmbeddingP
 export interface MockChromaOptions {
   searchResults?: SearchResult[];
   allIds?: string[];
-  allWithEmbeddings?: Array<{ id: string; embedding: number[]; date: string; filename: string; title: string }>;
+  allWithEmbeddings?: Array<{ id: string; embedding: number[]; date: string; filename: string; relativePath: string; title: string }>;
 }
 
 export function mockChroma(opts: MockChromaOptions = {}): EngramChroma {
@@ -57,7 +67,7 @@ export function mockVault(opts: MockVaultOptions = {}): Vault {
 // ── VaultIndex mock ─────────────────────────────────────────────────────────
 
 export interface MockVaultIndexOptions {
-  resolutions?: Map<string, { date: string; filename: string }>;
+  resolutions?: Map<string, { relativePath: string }>;
 }
 
 export function mockVaultIndex(opts: MockVaultIndexOptions = {}): VaultIndex {
@@ -67,5 +77,7 @@ export function mockVaultIndex(opts: MockVaultIndexOptions = {}): VaultIndex {
     size: () => resolutions.size,
     resolve: (id: string) => resolutions.get(id) ?? null,
     resolveWithFallback: async (id: string) => resolutions.get(id) ?? null,
+    set: () => {},
+    remove: () => {},
   } as unknown as VaultIndex;
 }

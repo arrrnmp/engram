@@ -1,20 +1,30 @@
 # Engram
 
-Provider-agnostic AI memory database. Conversations are saved as dated markdown files in an Obsidian vault, embedded in a vector database, and retrieved via an MCP server that works with any MCP-compatible agent.
+Multimodal AI memory database. Memories are saved as markdown files in an Obsidian vault (at arbitrary folder depths), embedded via Qwen3-VL-Embedding-8B into ChromaDB, and retrieved through an MCP server that works with any MCP-compatible agent. A file watcher keeps ChromaDB in sync with Obsidian edits in real time.
 
 ## Architecture
 
 ```
-Obsidian Vault (YYYY-MM-DD/title.md)
-       ↕ read/write
+Obsidian Vault (any/folder/path/title.md)
+       ↕ read/write + file watcher
   Engram MCP Server (Bun, HTTP/HTTPS, port 7384)
        ↕ embed / search
     ChromaDB (port 8000)
        ↑
-  Embedding Model (Qwen3-Embedding via Ollama / NVIDIA vLLM / OpenAI)
+  vLLM (port 8001) — Qwen3-VL-Embedding-2B
 ```
 
-Each Engram carries a stable UUID in its frontmatter. At startup the server scans the vault to build an in-memory index (UUID → file path) and re-embeds any files that are missing from ChromaDB. This means files can be freely renamed in Obsidian without breaking the index — the UUID survives the rename.
+Each Engram carries a stable UUID in its frontmatter. At startup the server scans the vault recursively to build an in-memory index (UUID → relative path), validates embedding dimensions, and re-embeds any files missing from ChromaDB. The file watcher then monitors for changes — new or modified `.md` files are automatically indexed. Files can be freely renamed or moved in Obsidian without breaking the index.
+
+### Key architectural patterns
+
+- **Session-based transport**: Per-client MCP server instances sharing expensive singletons (embedder, ChromaDB, vault, index)
+- **UUID identity**: Stable frontmatter IDs survive renames; VaultIndex maintains bidirectional UUID↔path mapping
+- **Dual storage**: Abstract stored in both vault and ChromaDB metadata for scalable listing/searching
+- **Body hash dedup**: SHA256 registry prevents duplicate embeddings; handles file watcher self-triggering
+- **Two-mode clustering**: O(n²) exact (≤300 engrams) or O(n·k) approximate (>300 engrams with K=15 neighbors)
+- **Hybrid search**: Semantic, keyword, or hybrid (0.7×semantic + 0.3×keyword) modes with LRU query cache
+- **Hardware-aware quant**: Auto-selects model variant by platform (Apple Silicon → MLX, Blackwell → NVFP4, older NVIDIA → GGUF)
 
 **Skills** are agent instructions loaded by the harness:
 - `/save-memory`, `/prefill`, `/update-important-memory`, `/dilucidate` — user-invocable only, never run automatically
@@ -38,28 +48,33 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. Run the onboarding script
+### 2. Start vLLM
+
+```bash
+vllm serve Qwen/Qwen3-VL-Embedding-8B --runner pooling --port 8001
+```
+
+vLLM must be running before the Engram server starts. See the hardware table below for quantization options.
+
+### 3. Run the onboarding script
 
 ```bash
 bun scripts/setup.ts
 ```
 
-The script checks every prerequisite, detects your hardware, recommends the right embedding model, sets up `config.json`, and offers to install missing pieces interactively. Works on macOS, Linux, and Windows.
+The script checks every prerequisite, detects your hardware, recommends the right quantization, sets up `config.json`, and offers to install missing pieces interactively. Works on macOS, Linux, and Windows.
 
 | What it checks | What it does if missing |
 |---|---|
-| Ollama | Links to installer |
-| Qwen3-Embedding model | Offers to `ollama pull` the right variant for your hardware |
+| vLLM | Shows start command with recommended quantization |
 | uv + chromadb | Offers to run `uv sync` (creates `.venv`, installs from `pyproject.toml`) |
 | Server deps | Runs `bun install` automatically |
 | `config.json` | Creates from defaults, asks for vault path |
 
-### 3. Start
+### 4. Start
 
 ```bash
-bun run start        # cross-platform (macOS, Linux, Windows)
-# or
-./scripts/start.sh   # macOS / Linux (direct shell invocation)
+bun run start        # starts ChromaDB, embedding server, Ollama (if configured), and Engram
 ```
 
 Run the test suite with:
@@ -74,17 +89,10 @@ Edit `config.json` for custom settings:
 
 ```json
 {
-  "vault": { "path": "~/Documents/my-engram-vault" }
-}
-```
-
-For OpenAI embeddings (no local runtime needed):
-
-```json
-{
+  "vault": { "path": "~/Documents/my-engram-vault" },
   "embedding": {
-    "provider": "openai",
-    "openai": { "apiKey": "sk-...", "model": "text-embedding-3-small" }
+    "vllm": { "host": "http://localhost:8001" },
+    "quant": "q4"
   }
 }
 ```
@@ -97,7 +105,22 @@ To tune the query embedding cache (default 64 entries, set to 0 to disable):
 }
 ```
 
-### 4. Connect your agent
+To use Ollama captioning with the Qwen3-VL model:
+
+```json
+{
+  "captioning": {
+    "provider": "ollama",
+    "host": "http://localhost:11434/v1",
+    "model": "engram-caption",
+    "prompt": "Describe this image concisely for search and retrieval."
+  }
+}
+```
+
+`bun run start` will auto-download `Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf`, create a local Ollama source model from it, and alias that model to `engram-caption`. If your current Ollama build cannot load that GGUF, it automatically falls back to `qwen2.5vl:3b`.
+
+### 5. Connect your agent
 
 The setup script auto-registers Engram's MCP endpoint and installs skills for all detected agent tools. Supported:
 
@@ -125,42 +148,70 @@ For other MCP clients, add manually:
 
 | Skill | Invoke | What it does |
 |---|---|---|
-| `save-memory` | `/save-memory` | Full extraction pass over the conversation → saves 2–5 focused Engrams with wikilinks |
+| `save-memory` | `/save-memory` | Full extraction pass over the conversation → saves 2–5 focused Engrams with wikilinks. Checks vault structure for folder placement. |
 | `prefill` | `/prefill` | Loads IMPORTANT.md into context at the start of a session |
 | `update-important-memory` | `/update-important-memory` | Reviews all Engrams and rewrites the persistent user profile |
-| `dilucidate` | `/dilucidate` | Weekly memory graph analysis: clusters related memories, flags contradictions, creates missing wikilinks, saves summaries, backfills tags, surfaces decaying memories — two-phase with approval gate |
-| `surface-memories` | *(auto-triggered)* | Silently searches for relevant context when a conversation touches a known topic; incorporates findings without announcing them |
+| `dilucidate` | `/dilucidate` | Weekly memory graph analysis: clusters, contradictions, wikilinks, summaries, tags, decay — two-phase with approval gate |
+| `surface-memories` | *(auto-triggered)* | Silently searches for relevant context when a conversation touches a known topic |
 
 ## MCP Tools
 
 The server exposes these tools directly (used by skills internally):
 
-| Tool | Description |
+## Server Modules
+
+| Module | Purpose |
 |---|---|
-| `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, and `content`. Accepts optional `type` (`"chat"`, `"code"`, `"idea"`, `"decision"`, etc.) |
-| `search_memory` | Search Engrams by `mode`: `"semantic"` (default, vector similarity), `"keyword"` (exact term scan — best for names, IDs, hostnames), `"hybrid"` (0.7 semantic + 0.3 keyword). Returns `abstract` on each result. Filterable by date range and type |
-| `list_engrams` | List Engrams, filterable by date range. Supports `limit` and `offset` for pagination. Returns UUID, title, abstract, date, filename, type — without reading full file bodies |
-| `read_engram` | Read the full content of a specific Engram by UUID |
-| `update_engram` | Update an existing Engram in-place: `setAbstract` (synced to ChromaDB), `setContent` (replaces body and re-embeds), `addTags`, `addWikilinks` |
-| `delete_engram` | Permanently delete an Engram — removes the vault file, ChromaDB entry, and index entry. Cannot be undone |
-| `cluster_memories` | Compute semantic clusters across all Engrams — returns groups, avg similarity, and missing wikilinks within each cluster. Used by `/dilucidate` |
+| `config.ts` | Zod-validated config from `config.json` / `config.local.json` |
+| `vault.ts` | Obsidian markdown I/O, frontmatter parsing, wikilink extraction |
+| `vault-index.ts` | UUID↔relativePath bidirectional mapping with collision detection |
+| `chroma.ts` | ChromaDB wrapper: upsert, search, metadata operations |
+| `wikilinks.ts` | Bidirectional `[[wikilinks]]` between similar engrams |
+| `embeddings/qwen-vl.ts` | Multimodal embedding provider via vLLM |
+| `embeddings/cache.ts` | LRU cache for query embeddings |
+| `embeddings/index.ts` | Provider factory with hardware-aware selection |
+| `hardware/detect.ts` | Cross-platform hardware detection (Apple/NVIDIA/CPU) |
+| `hardware/memory.ts` | Quantization variant selection by available memory |
+| `media-processor.ts` | PDF, Office, image, video processing pipeline |
+| `media-cache.ts` | Media processing cache to avoid redundant work |
+| `body-hash.ts` | SHA256 body hash deduplication registry |
+| `watcher.ts` | Recursive file watcher with debounce and UUID assignment |
+| `dilucidate/cluster.ts` | O(n²)/O(n·k) clustering with missing wikilink detection |
+| `search/keyword.ts` | In-process keyword search with two-pass filtering |
+| `logger.ts` | Winston logging to console + files |
+
+## MCP Tools
+| `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, `content`. Optional `folder` for vault-relative placement, `type` for categorization |
+| `search_memory` | Search by `mode`: `"semantic"` (default), `"keyword"` (exact terms), `"hybrid"` (0.7+0.3 merge). Filterable by date range, type. Returns `abstract` on each result |
+| `list_engrams` | List Engrams, filterable by date range. Supports pagination. Returns UUID, title, abstract, date, relativePath, type — no file body reads |
+| `read_engram` | Read a single Engram by UUID. Returns structured content: title, date, type, tags, body, wikilinks |
+| `read_engrams` | Batch read up to 20 Engrams in one call. 80K char response guard. |
+| `update_engram` | Update in-place: `setAbstract` (synced to ChromaDB), `setContent` (replaces body, re-embeds), `editContent` (targeted string replacement, re-embeds), `addTags`, `addWikilinks` |
+| `delete_engram` | Permanently delete — removes vault file, ChromaDB entry, index entry, body hash. Cannot be undone |
+| `cluster_memories` | Compute semantic clusters — returns groups, avg similarity, missing wikilinks. Used by `/dilucidate` |
+| `get_vault_structure` | Get the current vault directory tree. Call before `save_memory` to choose an appropriate folder |
 | `get_important_context` | Read IMPORTANT.md |
 | `update_important_context` | Write IMPORTANT.md |
-| `get_dilucidate_meta` | Read `.dilucidate-meta.json` (run history and early-exit state for `/dilucidate`) |
-| `update_dilucidate_meta` | Write `.dilucidate-meta.json` after a `/dilucidate` run |
+| `get_dilucidate_meta` | Read `.dilucidate-meta.json` (run history and early-exit state) |
+| `update_dilucidate_meta` | Write `.dilucidate-meta.json` after a dilucidate run. Server-side merge with 50-entry history cap |
 
-## Embedding Providers
+## Embedding Model
 
-The server auto-detects the best provider for your hardware:
+Qwen3-VL-Embedding-2B via vLLM — single provider for text, images, video, and PDFs. 2048-dimensional output.
 
-| Hardware | Provider | Model |
-|---|---|---|
-| Apple Silicon | Ollama (Metal acceleration) | Qwen3-Embedding |
-| NVIDIA Blackwell (CC ≥ 10.0) | vLLM NVFP4 → Ollama CUDA fallback | Qwen3-Embedding |
-| NVIDIA older / CPU | Ollama | Qwen3-Embedding |
-| Override | OpenAI API | text-embedding-3-small/large |
+| Quant | VRAM | vLLM flag | Notes |
+|---|---|---|---|
+| Q8 | ~11 GB | `--quantization bitsandbytes` | Highest quality |
+| Q6 | ~9 GB | GPTQ 6-bit | Good balance |
+| Q4 | ~7 GB | `--quantization awq` | Recommended default |
+| NVFP4 | ~7 GB | `--quantization nvfp4` | Blackwell only |
 
-**Memory budget**: the server never loads a model that would exceed `availableMemory × (1 - overheadBuffer)`. It steps down through quantizations (q8_0 → q6_k → q4_k_m) and then from 8B to 4B. Minimum is 4-bit quantization; if nothing fits, it exits with a clear error suggesting OpenAI fallback.
+The server auto-selects the highest-quality quantization that fits your GPU memory (with 25% overhead buffer). Override with `"quant": "q4"` in config.
+
+If the embedding model changes after data is stored, run the migration script:
+```bash
+bun scripts/migrate.ts
+```
 
 ## Vault Structure
 
@@ -168,21 +219,23 @@ The server auto-detects the best provider for your hardware:
 ~/Documents/my-engram-vault/
 ├── IMPORTANT.md                                   ← persistent user profile
 ├── .dilucidate-meta.json                          ← /dilucidate run history
+├── .engram-body-hashes.json                       ← dedup registry
 ├── 2026-04-29/
-│   └── Rust Async Runtime — Design Decisions.md  ← human-readable filenames
+│   └── Rust Async Runtime — Design Decisions.md
 ├── 2026-04-28/
 │   └── Homelab Network Architecture.md
+├── projects/
+│   └── Engram/
+│       └── Architecture.md                        ← arbitrary folder depth
 └── ...
 ```
 
-Each Engram is a standard markdown file with YAML frontmatter and `[[wikilinks]]` to related memories — fully readable in Obsidian, including graph view.
+Files at any depth are indexed. The file watcher detects new, modified, and deleted `.md` files in real time. Duplicate body content is detected via SHA256 hashes and skipped with a warning.
 
 ```yaml
 ---
 id: "3f7a2c1d-..."         ← stable UUID; survives renames
-abstract: "A 3–6 sentence summary of the engram's key content, written in
-  English. Enables cheap full-vault scanning via list_engrams without
-  reading every file body."
+abstract: "A 3–6 sentence summary of the engram's key content..."
 title: "Rust Async Runtime — Design Decisions"
 date: "2026-04-29"
 type: "decision"
@@ -192,7 +245,23 @@ tags: ["rust", "architecture"]
 Engram content here.
 
 ## Related Memories
-- [[2026-04-28/Homelab Network Architecture]]
+- [[projects/Engram/Architecture]]
 ```
 
-Filenames preserve spaces, capitals, and symbols — anything valid on macOS and Windows. The UUID in frontmatter is the stable identity used by ChromaDB; the filename is purely for human readability. The `abstract` field lets skills scan the entire vault cheaply — `list_engrams` returns it without reading file bodies, so skills like `/update-important-memory` and `/dilucidate` can make a first-pass decision without calling `read_engram` on every file. Obsidian's built-in rename handling keeps `[[wikilinks]]` consistent when files are moved or renamed.
+Wikilinks use vault-relative paths (without `.md`), so Obsidian's graph view stays human-readable and files can be freely moved between folders.
+
+## Dilucidate Routine
+
+The `routines/dilucidate.md` file contains the self-contained prompt for a weekly Claude Code desktop scheduled task. Configure as:
+- **Schedule**: Weekly Sunday 10 AM
+- **Model**: Sonnet 4.6
+- **Permission**: Accept edits
+- **Two-phase**: Phase 1 analyzes (read-only), Phase 2 executes writes
+
+## Testing
+
+Run the test suite with `cd server && bun test`.
+
+**Well-covered**: LRU cache, clustering, search, media processing, keyword search
+
+**Coverage gaps**: Vault index rename handling, wikilink backlinks, file watcher upsert logic, concurrent access scenarios

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "setup": "bun scripts/setup.ts",
-    "start": "bun scripts/start.ts"
+    "start": "bun scripts/start.ts",
+    "re-embed": "bun scripts/start.ts --re-embed"
   },
   "devDependencies": {
     "bun-types": "^1.3.13"

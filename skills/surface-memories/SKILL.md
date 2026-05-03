@@ -17,7 +17,7 @@ A relevant topic has come up that may have saved context in Engram. Search for i
 
 1. **Identify 1–3 search queries** from the current conversation. Always formulate queries in **English**, regardless of the conversation language. Good queries are specific: a project name, a person's name, a technology, a decision domain. Bad queries are generic: "coding", "preferences", "help".
 
-2. **Call `search_memory`** with each query (n_results: 3). Run them in parallel if possible.
+2. **Call `search_memory`** with each query (n_results: 3, caller: "surface-memories"). Run them in parallel if possible.
 
    Choose `mode` based on the query type:
    - `"hybrid"` — when the query contains a specific proper noun, identifier, name, or technology (e.g. "Engram", "rack-01", "Qwen3"). The keyword pass boosts exact matches that the vector might rank lower.

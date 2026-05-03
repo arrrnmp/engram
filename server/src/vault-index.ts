@@ -1,30 +1,53 @@
-import { readdirSync, readFileSync, statSync, existsSync } from "fs";
-import { join } from "path";
-import { parseEngram } from "./vault.js";
+import { readdirSync, readFileSync, statSync, existsSync, writeFileSync } from "fs";
+import { join, relative } from "path";
+import matter from "gray-matter";
 import type { EngramChroma } from "./chroma.js";
+import { logger } from "./logger.js";
 
-interface Location {
-  date: string;
-  filename: string;
+export interface Location {
+  relativePath: string;
 }
 
 export class VaultIndex {
   private map = new Map<string, Location>();
+  private reverseMap = new Map<string, string>(); // relativePath → uuid
 
   build(vaultRoot: string): void {
     this.map.clear();
+    this.reverseMap.clear();
     if (!existsSync(vaultRoot)) return;
 
-    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-    for (const entry of readdirSync(vaultRoot)) {
-      if (!DATE_RE.test(entry)) continue;
-      const dirPath = join(vaultRoot, entry);
-      if (!statSync(dirPath).isDirectory()) continue;
-      for (const filename of readdirSync(dirPath).filter((f) => f.endsWith(".md"))) {
+    this.scanDir(vaultRoot, vaultRoot);
+  }
+
+  private scanDir(dir: string, vaultRoot: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      if (entry.name === "_chunks") continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        this.scanDir(fullPath, vaultRoot);
+      } else if (entry.name.endsWith(".md")) {
+        const relativePath = relative(vaultRoot, fullPath);
         try {
-          const raw = readFileSync(join(dirPath, filename), "utf-8");
-          const { id } = parseEngram(raw);
-          if (id) this.map.set(id, { date: entry, filename });
+          const raw = readFileSync(fullPath, "utf-8");
+          const parsed = matter(raw);
+          const id = typeof parsed.data.id === "string" ? parsed.data.id : undefined;
+          if (id) {
+            if (this.map.has(id)) {
+              // UUID collision — reassign to the second file
+              const newId = crypto.randomUUID();
+              parsed.data.id = newId;
+              const rewritten = matter.stringify(parsed.content, parsed.data);
+              writeFileSync(fullPath, rewritten, "utf-8");
+              this.map.set(newId, { relativePath });
+              this.reverseMap.set(relativePath, newId);
+              logger.warn(`[vault-index] UUID collision: reassigned ${relativePath} → ${newId}`);
+            } else {
+              this.map.set(id, { relativePath });
+              this.reverseMap.set(relativePath, id);
+            }
+          }
         } catch {}
       }
     }
@@ -32,6 +55,10 @@ export class VaultIndex {
 
   resolve(id: string): Location | undefined {
     return this.map.get(id);
+  }
+
+  resolveByPath(relativePath: string): string | undefined {
+    return this.reverseMap.get(relativePath);
   }
 
   async resolveWithFallback(
@@ -52,7 +79,16 @@ export class VaultIndex {
     return null;
   }
 
+  set(id: string, location: Location): void {
+    this.map.set(id, location);
+    this.reverseMap.set(location.relativePath, id);
+  }
+
   remove(id: string): void {
+    const loc = this.map.get(id);
+    if (loc) {
+      this.reverseMap.delete(loc.relativePath);
+    }
     this.map.delete(id);
   }
 

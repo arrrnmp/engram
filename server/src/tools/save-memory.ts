@@ -4,6 +4,8 @@ import type { Config } from "../config.js";
 import type { EmbeddingProvider } from "../embeddings/types.js";
 import { formatEngram, toSlug, Vault } from "../vault.js";
 import { generateAndApplyWikilinks } from "../wikilinks.js";
+import type { VaultIndex } from "../vault-index.js";
+import { sanitizeFolderPath } from "./vault-structure.js";
 
 export const SaveMemoryInput = z.object({
   title: z.string().min(1).max(128).describe("Short title for this memory"),
@@ -20,6 +22,16 @@ export const SaveMemoryInput = z.object({
     .max(64)
     .optional()
     .describe('Category of memory (e.g. "code", "chat", "idea", "decision"). Optional — omit for uncategorized.'),
+  folder: z
+    .string()
+    .max(256)
+    .optional()
+    .describe(
+      "Vault-relative folder path to save this memory in (e.g. \"projects/Engram\" or \"personal\"). " +
+      "If omitted, defaults to YYYY-MM-DD/ (today's date). " +
+      "The folder is created if it does not exist. " +
+      "Call get_vault_structure first to see existing folders."
+    ),
 });
 
 export type SaveMemoryInput = z.infer<typeof SaveMemoryInput>;
@@ -29,22 +41,32 @@ export async function saveMemory(
   vault: Vault,
   chroma: EngramChroma,
   embedder: EmbeddingProvider,
-  config: Config
+  config: Config,
+  vaultIndex?: VaultIndex
 ) {
   const id = crypto.randomUUID();
   const date = input.date ?? new Date().toISOString().slice(0, 10);
+  const dir = input.folder
+    ? sanitizeFolderPath(input.folder, vault.root)
+    : date;
   const filename = `${toSlug(input.title)}.md`;
-  const wikiPath = `${date}/${toSlug(input.title)}`;
+  const relativePath = `${dir}/${filename}`;
+  const wikiPath = `${dir}/${toSlug(input.title)}`;
 
   // Embed once — reused for wikilink search and ChromaDB indexing.
-  const embedding = await embedder.embed(input.content);
+  const embedding = await embedder.embed(input.content, { taskInstruction: "Represent the following document for retrieval: " });
   const wikilinks = await generateAndApplyWikilinks(
     id, wikiPath, embedding, vault, chroma,
     config.wikilinks.threshold,
     config.wikilinks.maxLinks
   );
 
-  vault.writeEngram(date, input.title, formatEngram(id, input.abstract, input.title, date, input.content, wikilinks, input.type));
+  vault.writeEngram(dir, input.title, formatEngram(id, input.abstract, input.title, date, input.content, wikilinks, input.type));
+
+  // Register in the vault index immediately to avoid race with save path.
+  if (vaultIndex) {
+    vaultIndex.set(id, { relativePath });
+  }
 
   // Index in ChromaDB.
   await chroma.upsert(
@@ -54,6 +76,7 @@ export async function saveMemory(
       title: input.title,
       date,
       filename,
+      relativePath,
       vaultPath: vault.root,
       abstract: input.abstract,
       type: input.type,
@@ -65,8 +88,9 @@ export async function saveMemory(
     id,
     date,
     filename,
+    relativePath,
     type: input.type,
     wikilinks,
-    message: `Engram saved: ${filename} [${id}]${input.type ? ` (type: ${input.type})` : ""}${wikilinks.length > 0 ? ` (${wikilinks.length} related memories linked)` : ""}`,
+    message: `Engram saved: ${relativePath} [${id}]${input.type ? ` (type: ${input.type})` : ""}${wikilinks.length > 0 ? ` (${wikilinks.length} related memories linked)` : ""}`,
   };
 }

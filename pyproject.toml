@@ -2,7 +2,18 @@
 name = "engram"
 version = "0.1.0"
 description = "Engram AI Memory Database — Python dependencies"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "chromadb>=0.6.0",
+]
+
+[dependency-groups]
+vllm = ["vllm>=0.9.0 ; sys_platform == 'linux'"]
+mlx = [
+  # PR #61 — torch-free numpy processor; removes the AutoImageProcessor torch check.
+  # Pin to this branch until merged and released on PyPI.
+  "mlx-embeddings @ git+https://github.com/Blaizzy/mlx-embeddings.git@pc/qwen3-vl-torch-free-processor ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "fastapi>=0.115.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "uvicorn[standard]>=0.30.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "pillow>=10.0.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]

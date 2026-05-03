@@ -21,14 +21,16 @@ export async function generateAndApplyWikilinks(
 
   if (related.length === 0) return [];
 
-  // Wikilinks use vault paths (date/filename), not ChromaDB UUIDs.
-  const newLinks = related.map(
-    (r) => `${r.date}/${r.filename.replace(/\.md$/, "")}`
-  );
+  const newLinks = related.map((r) => toWikiPath(r));
 
   await addBacklinks(wikiPath, related, vault);
 
   return newLinks;
+}
+
+export function toWikiPath(r: { relativePath?: string; date: string; filename: string }): string {
+  if (r.relativePath) return r.relativePath.replace(/\.md$/, "");
+  return `${r.date}/${r.filename.replace(/\.md$/, "")}`;
 }
 
 async function addBacklinks(
@@ -38,9 +40,10 @@ async function addBacklinks(
 ): Promise<void> {
   for (const r of related) {
     try {
-      const existing = vault.readEngram(r.date, r.filename);
+      const rp = r.relativePath || `${r.date}/${r.filename}`;
+      const existing = vault.readEngram(rp);
       if (existing.includes(`[[${wikiPath}]]`)) continue;
-      vault.updateEngram(r.date, r.filename, updateEngramWikilinks(existing, [wikiPath]));
+      vault.updateEngram(rp, updateEngramWikilinks(existing, [wikiPath]));
     } catch {
       // Engram may have been moved or deleted; skip silently.
     }

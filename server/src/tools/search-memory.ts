@@ -37,6 +37,10 @@ export const SearchMemoryInput = z.object({
       '"keyword": exact term matching via vault scan — best for proper nouns, identifiers, hostnames. ' +
       '"hybrid": weighted merge of both passes (0.7 semantic + 0.3 keyword).'
     ),
+  caller: z
+    .enum(["surface-memories", "user"])
+    .default("user")
+    .describe("Origin of the search call. Used internally — no behavior change currently."),
 });
 
 export type SearchMemoryInput = z.infer<typeof SearchMemoryInput>;
@@ -55,7 +59,7 @@ export async function searchMemory(
   let semanticResults: Awaited<ReturnType<typeof chroma.search>> = [];
   if (mode !== "keyword") {
     const cached = queryCache?.get(input.query);
-    const embedding = cached ?? await embedder.embed(input.query);
+    const embedding = cached ?? await embedder.embed(input.query, { taskInstruction: "Represent the following query for retrieval: " });
     if (!cached && queryCache) queryCache.set(input.query, embedding);
     // Fetch extra candidates to give the merge step room to work.
     semanticResults = await chroma.search(embedding, n * 2, input.date_range, input.type);
@@ -76,10 +80,12 @@ export async function searchMemory(
         title: r.title,
         date: r.date,
         filename: r.filename,
+        relativePath: r.relativePath,
         excerpt: r.excerpt,
         similarity: Math.round(r.similarity * 1000) / 1000,
         ...(r.abstract ? { abstract: r.abstract } : {}),
         ...(r.type ? { type: r.type } : {}),
+        ...(r.parentEngramId ? { isChunk: true, parentEngramId: r.parentEngramId } : {}),
       })),
       total: semanticResults.length,
     };
@@ -95,11 +101,13 @@ export async function searchMemory(
         title: r.title,
         date: r.date,
         filename: r.filename,
+        relativePath: r.relativePath,
         excerpt: r.excerpt,
         keywordScore: Math.round(r.score * 1000) / 1000,
         score: Math.round(r.score * 1000) / 1000,
         ...(r.abstract ? { abstract: r.abstract } : {}),
         ...(r.type ? { type: r.type } : {}),
+        ...(r.parentEngramId ? { isChunk: true, parentEngramId: r.parentEngramId } : {}),
       })),
       total: keywordResults.length,
     };
@@ -129,12 +137,14 @@ export async function searchMemory(
       title: meta.title,
       date: meta.date,
       filename: meta.filename,
+      relativePath: meta.relativePath,
       excerpt: meta.excerpt,
       similarity: Math.round(semantic * 1000) / 1000,
       keywordScore: Math.round(keyword * 1000) / 1000,
       score: Math.round((SEMANTIC_WEIGHT * semantic + KEYWORD_WEIGHT * keyword) * 1000) / 1000,
       ...(meta.abstract ? { abstract: meta.abstract } : {}),
       ...(meta.type ? { type: meta.type } : {}),
+      ...("parentEngramId" in meta && meta.parentEngramId ? { isChunk: true, parentEngramId: meta.parentEngramId } : {}),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, n);

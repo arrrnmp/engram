@@ -4,9 +4,8 @@ import {
   mkdirSync,
   existsSync,
   readdirSync,
-  statSync,
 } from "fs";
-import { join, basename } from "path";
+import { join } from "path";
 import { homedir } from "os";
 import matter from "gray-matter";
 
@@ -18,7 +17,7 @@ export interface EngramEntry {
   date: string;
   filename: string;
   title: string;
-  path: string;
+  relativePath: string;
   type?: string;
 }
 
@@ -32,21 +31,21 @@ export class Vault {
     mkdirSync(this.root, { recursive: true });
   }
 
-  writeEngram(date: string, title: string, content: string): string {
-    const dir = join(this.root, date);
-    mkdirSync(dir, { recursive: true });
+  writeEngram(dir: string, title: string, content: string): string {
+    const fullDir = join(this.root, dir);
+    mkdirSync(fullDir, { recursive: true });
     const filename = `${toSlug(title)}.md`;
-    const filepath = join(dir, filename);
+    const filepath = join(fullDir, filename);
     writeFileSync(filepath, content, "utf-8");
     return filepath;
   }
 
-  readEngram(date: string, filename: string): string {
-    return readFileSync(join(this.root, date, filename), "utf-8");
+  readEngram(relativePath: string): string {
+    return readFileSync(join(this.root, relativePath), "utf-8");
   }
 
-  updateEngram(date: string, filename: string, content: string): void {
-    writeFileSync(join(this.root, date, filename), content, "utf-8");
+  updateEngram(relativePath: string, content: string): void {
+    writeFileSync(join(this.root, relativePath), content, "utf-8");
   }
 
   readImportant(): string {
@@ -60,43 +59,54 @@ export class Vault {
 
   listEngrams(dateRange?: { from?: string; to?: string }): EngramEntry[] {
     const entries: EngramEntry[] = [];
-
     if (!existsSync(this.root)) return entries;
-
-    const dirs = readdirSync(this.root)
-      .filter((d) => DATE_RE.test(d))
-      .filter((d) => {
-        if (dateRange?.from && d < dateRange.from) return false;
-        if (dateRange?.to && d > dateRange.to) return false;
-        return true;
-      })
-      .sort();
-
-    for (const date of dirs) {
-      const dirPath = join(this.root, date);
-      if (!statSync(dirPath).isDirectory()) continue;
-
-    const files = readdirSync(dirPath).filter((f) => f.endsWith(".md"));
-    for (const filename of files) {
-      const entry: EngramEntry = {
-        date,
-        filename,
-        title: filename.replace(/\.md$/, ""), // fallback: raw filename
-        path: join(dirPath, filename),
-      };
-      try {
-        const raw = readFileSync(join(dirPath, filename), "utf-8");
-        const parsed = parseEngram(raw);
-        if (parsed.id) entry.id = parsed.id;
-        if (parsed.abstract) entry.abstract = parsed.abstract;
-        if (parsed.title) entry.title = parsed.title;
-        if (parsed.type) entry.type = parsed.type;
-      } catch {}
-      entries.push(entry);
-    }
-    }
-
+    this.scanEngrams(this.root, entries, dateRange);
+    entries.sort((a, b) => b.date.localeCompare(a.date));
     return entries;
+  }
+
+  private scanEngrams(
+    dir: string,
+    entries: EngramEntry[],
+    dateRange?: { from?: string; to?: string }
+  ): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        this.scanEngrams(fullPath, entries, dateRange);
+      } else if (entry.name.endsWith(".md")) {
+        const relativePath = fullPath.slice(this.root.length + 1);
+        const filename = entry.name;
+
+        // Derive date from frontmatter or from the path if it starts with a date dir.
+        const firstDir = relativePath.split("/")[0] ?? "";
+        const pathDate = DATE_RE.test(firstDir) ? firstDir : "";
+
+        const engEntry: EngramEntry = {
+          date: pathDate,
+          filename,
+          title: filename.replace(/\.md$/, ""),
+          relativePath,
+        };
+        try {
+          const raw = readFileSync(fullPath, "utf-8");
+          const parsed = parseEngram(raw);
+          if (parsed.id) engEntry.id = parsed.id;
+          if (parsed.abstract) engEntry.abstract = parsed.abstract;
+          if (parsed.title) engEntry.title = parsed.title;
+          if (parsed.type) engEntry.type = parsed.type;
+          // Use frontmatter date if available, otherwise keep path-derived date.
+          if (parsed.date) engEntry.date = parsed.date;
+        } catch {}
+
+        // Apply date range filter on the engram's date.
+        if (dateRange?.from && engEntry.date < dateRange.from) continue;
+        if (dateRange?.to && engEntry.date > dateRange.to) continue;
+
+        entries.push(engEntry);
+      }
+    }
   }
 
 }

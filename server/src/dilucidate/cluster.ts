@@ -168,9 +168,9 @@ function isLinked(
   const toLoc = vaultIndex.resolve(toId);
   // If we can't resolve a location, assume linked to avoid false-positive noise.
   if (!fromLoc || !toLoc) return true;
-  const wikiPath = `${toLoc.date}/${toLoc.filename.replace(/\.md$/, "")}`;
+  const wikiPath = toLoc.relativePath.replace(/\.md$/, "");
   try {
-    return vault.readEngram(fromLoc.date, fromLoc.filename).includes(`[[${wikiPath}]]`);
+    return vault.readEngram(fromLoc.relativePath).includes(`[[${wikiPath}]]`);
   } catch {
     return true;
   }

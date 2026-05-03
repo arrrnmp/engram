@@ -9,7 +9,12 @@ const consoleFormat = format.combine(
   format.colorize(),
   format.timestamp({ format: "HH:mm:ss" }),
   format.printf(({ timestamp, level, message, ...meta }) => {
-    const extra = Object.keys(meta).length ? " " + JSON.stringify(meta) : "";
+    const cleaned = Object.fromEntries(
+      Object.entries(meta).map(([k, v]) =>
+        v instanceof Error ? [k, { message: v.message, stack: v.stack }] : [k, v]
+      )
+    );
+    const extra = Object.keys(cleaned).length ? " " + JSON.stringify(cleaned) : "";
     return `${timestamp} ${level} ${message}${extra}`;
   })
 );

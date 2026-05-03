@@ -2,8 +2,6 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
 
-const EmbeddingProviderSchema = z.enum(["auto", "ollama", "nvidia", "openai"]);
-
 const ConfigSchema = z.object({
   vault: z.object({
     path: z.string().min(1),
@@ -30,26 +28,36 @@ const ConfigSchema = z.object({
     .default({}),
   embedding: z
     .object({
-      provider: EmbeddingProviderSchema.default("auto"),
-      model: z.enum(["8b", "4b"]).optional(),
       queryCacheSize: z.number().int().min(0).max(1024).default(64),
       overheadBuffer: z.number().min(0.1).max(0.5).default(0.25),
-      ollama: z
-        .object({ host: z.string().url().default("http://localhost:11434") })
-        .default({}),
-      nvidia: z
-        .object({ host: z.string().url().default("http://localhost:8001") })
-        .default({}),
-      openai: z
+      quant: z.enum(["q8_0", "q6_k", "q5_k_m", "q4_k_m"]).optional(),
+      batchSize: z.number().int().min(1).max(256).optional(),
+      batchMaxChars: z.number().int().min(1000).optional(),
+      vllm: z
         .object({
-          apiKey: z.string().min(1),
-          model: z
-            .enum(["text-embedding-3-small", "text-embedding-3-large"])
-            .default("text-embedding-3-small"),
+          host: z.string().url().default("http://localhost:8001"),
+          healthTimeout: z.number().int().min(1000).max(30000).default(2000),
         })
-        .optional(),
+        .default({}),
     })
     .default({}),
+  watcher: z
+    .object({
+      enabled: z.boolean().default(true),
+      libreOfficePath: z.string().default("libreoffice"),
+    })
+    .default({}),
+captioning: z
+    .object({
+      provider: z.enum(["auto", "ollama", "openai"]).default("auto"),
+      host: z.string().url().default("http://localhost:11434/v1"),
+      model: z.string().default("engram-caption"),
+      prompt: z.string().default("Describe this image concisely for search and retrieval."),
+      fallbackHost: z.string().url().optional(),
+      fallbackModel: z.string().optional(),
+      fallbackProvider: z.enum(["ollama", "openai"]).optional(),
+    })
+    .optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

@@ -127,18 +127,16 @@ function detectHW(): HW {
 // ── Model selection (mirrors server/src/hardware/memory.ts) ──────────────────
 interface Variant {
   label: string;
-  ollamaTag: string;
+  quant: string;
   vramGB: number;
   bits: number;
 }
 
 const VARIANTS: Variant[] = [
-  { label: "8B q8_0",   ollamaTag: "qwen3-embedding:8b-q8_0",   vramGB: 8.5, bits: 8   },
-  { label: "8B q6_k",   ollamaTag: "qwen3-embedding:8b-q6_k",   vramGB: 6.5, bits: 6   },
-  { label: "8B q4_k_m", ollamaTag: "qwen3-embedding:8b-q4_k_m", vramGB: 4.7, bits: 4.5 },
-  { label: "4B q8_0",   ollamaTag: "qwen3-embedding:4b-q8_0",   vramGB: 4.5, bits: 8   },
-  { label: "4B q6_k",   ollamaTag: "qwen3-embedding:4b-q6_k",   vramGB: 3.5, bits: 6   },
-  { label: "4B q4_k_m", ollamaTag: "qwen3-embedding:4b-q4_k_m", vramGB: 2.5, bits: 4.5 },
+  { label: "Qwen3-VL-Embedding-2B Q8",   quant: "q8",    vramGB: 4, bits: 8 },
+  { label: "Qwen3-VL-Embedding-2B Q6",   quant: "q6",    vramGB: 3,  bits: 6 },
+  { label: "Qwen3-VL-Embedding-2B Q4",   quant: "q4",    vramGB: 2,  bits: 4 },
+  { label: "Qwen3-VL-Embedding-2B NVFP4", quant: "nvfp4", vramGB: 2,  bits: 4 },
 ];
 
 const OVERHEAD = 0.25;
@@ -173,41 +171,6 @@ function resolveVault(p: string): string {
   return p.startsWith("~") ? join(homedir(), p.slice(1)) : resolve(p);
 }
 
-// ── Ollama model check ────────────────────────────────────────────────────────
-// Returns the model list on success, null if the server is unreachable.
-// Tries 127.0.0.1 as a fallback when host uses "localhost", because Ollama
-// binds to 127.0.0.1 only and Bun's fetch may resolve localhost → ::1 (IPv6).
-async function getOllamaModels(host: string): Promise<string[] | null> {
-  const candidates = host.includes("localhost")
-    ? [host, host.replace("localhost", "127.0.0.1")]
-    : [host];
-
-  for (const h of candidates) {
-    try {
-      const res = await fetch(`${h}/api/tags`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as { models: Array<{ name: string }> };
-      return data.models.map((m) => m.name);
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-function normaliseTag(tag: string): string {
-  return tag.includes(":") ? tag : `${tag}:latest`;
-}
-
-function modelPresent(models: string[], tag: string): boolean {
-  const norm = normaliseTag(tag);
-  return models.some(
-    (m) => normaliseTag(m) === norm || m === tag || m.startsWith(`${tag}:`)
-  );
-}
-
 // ── uv detection ─────────────────────────────────────────────────────────────
 function uvInstallInstructions(): string {
   if (IS_WIN) return "powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"";
@@ -224,6 +187,26 @@ function chromaInVenv(): boolean {
 
 function chromaVersion(): string | null {
   return runCapture("uv", ["run", "--frozen", "python", "-c", "import chromadb; print(chromadb.__version__)"]);
+}
+
+function vllmInVenv(): boolean {
+  const r = spawnSync("uv", ["run", "--frozen", "python", "-c", "import vllm"], {
+    cwd: ROOT,
+    stdio: "ignore",
+  });
+  return r.status === 0;
+}
+
+function vllmVersion(): string | null {
+  return runCapture("uv", ["run", "--frozen", "python", "-c", "import vllm; print(vllm.__version__)"]);
+}
+
+function mlxInVenv(): boolean {
+  const r = spawnSync("uv", ["run", "--frozen", "python", "-c", "import mlx_embeddings"], {
+    cwd: ROOT,
+    stdio: "ignore",
+  });
+  return r.status === 0;
 }
 
 // ── HTTPS / mkcert helpers ────────────────────────────────────────────────────
@@ -612,16 +595,16 @@ async function main(): Promise<void> {
     row(
       arrow,
       `Recommended model: ${c.bold}${recommended.label}${c.reset}`,
-      `${recommended.vramGB} GB · ${recommended.bits}-bit · tag: ${recommended.ollamaTag}`
+      `${recommended.vramGB} GB · ${recommended.bits}-bit`
     );
   } else {
     row(
       warn,
       "Insufficient memory for any 4-bit+ model",
-      "Consider setting embedding.provider = \"openai\" in config.json"
+      "Consider a machine with at least 8 GB GPU memory"
     );
     issues.push(
-      `Not enough memory for local embeddings. Add OpenAI API key to config.json.`
+      `Not enough memory for local embeddings. Need at least 7 GB available GPU memory.`
     );
   }
 
@@ -635,7 +618,7 @@ async function main(): Promise<void> {
       vault: { path: "~/Documents/engram-vault" },
       server: { port: 7384 },
       chroma: { host: "http://localhost:8000", collection: "engrams" },
-      embedding: { provider: "auto", overheadBuffer: 0.25 },
+      embedding: { overheadBuffer: 0.25, vllm: { host: "http://localhost:8001" } },
     };
   } else {
     row(ok, "config.json found");
@@ -672,76 +655,141 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── 4. Ollama ───────────────────────────────────────────────────────────────
-  section("Ollama (local embeddings)");
+  // ── 4. Embedding server ────────────────────────────────────────────────────
+  section("Embedding server");
 
   const cfg2 = loadRawConfig() as any;
-  const ollamaHost: string = cfg2?.embedding?.ollama?.host ?? "http://localhost:11434";
+  const embedHost: string = cfg2?.embedding?.vllm?.host ?? "http://localhost:8001";
 
-  if (!cmdExists("ollama")) {
-    row(fail, "Ollama not installed");
-    const installUrl = IS_WIN
-      ? "https://ollama.com/download/windows"
-      : IS_MAC
-      ? "https://ollama.com/download/mac"
-      : "https://ollama.com/download/linux";
-    issues.push(`Install Ollama from ${installUrl}`);
-
-    if (recommended) {
-      issues.push(
-        `Then pull the embedding model:\n    ollama pull ${recommended.ollamaTag}`
-      );
+  async function isEmbedServerRunning(host: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${host}/health`, { signal: AbortSignal.timeout(3000) });
+      return res.ok || res.status < 500;
+    } catch {
+      return false;
     }
-  } else {
-    row(ok, "Ollama installed");
+  }
 
-    const models = await getOllamaModels(ollamaHost);
-
-    if (models === null) {
-      row(warn, `Ollama server not reachable at ${ollamaHost}`);
-      row(arrow, `Engram will start Ollama automatically when the server launches`);
+  if (await isEmbedServerRunning(embedHost)) {
+    row(ok, `Embedding server running at ${embedHost}`);
+  } else if (IS_MAC) {
+    // macOS: MLX embedding server (mlx-embeddings + FastAPI)
+    if (mlxInVenv()) {
+      row(ok, `mlx-embeddings installed (venv) — will load Qwen3-VL-Embedding-2B nvfp4`);
+      row(arrow, "Will auto-start when you run: bun run start");
     } else {
-      row(ok, `Ollama running at ${ollamaHost}`);
-
-      if (recommended) {
-        if (modelPresent(models, recommended.ollamaTag)) {
-          row(ok, `Model present: ${recommended.ollamaTag}`);
+      row(warn, "mlx-embeddings not installed");
+      const doInstall = await confirm(
+        "Install mlx-embeddings + server deps via uv? (first run will download model weights)"
+      );
+      if (doInstall) {
+        console.log();
+        const success = runInherit("uv", ["sync", "--group", "mlx"]);
+        if (success) {
+          row(ok, "mlx-embeddings installed into .venv");
         } else {
-          row(warn, `Model not found: ${recommended.ollamaTag}`);
-          console.log(
-            `     ${c.gray}(${recommended.vramGB} GB download)${c.reset}`
-          );
-
-          const doPull = await confirm(
-            `Pull ${c.bold}${recommended.ollamaTag}${c.reset} now?`
-          );
-          if (doPull) {
-            console.log();
-            const success = runInherit("ollama", ["pull", recommended.ollamaTag]);
-            if (success) {
-              row(ok, `Model pulled: ${recommended.ollamaTag}`);
-            } else {
-              row(fail, `Pull failed`);
-              issues.push(
-                `Manually pull the model: ollama pull ${recommended.ollamaTag}`
-              );
-            }
-          } else {
-            issues.push(
-              `Pull the embedding model before starting:\n    ollama pull ${recommended.ollamaTag}`
-            );
-          }
+          row(fail, "uv sync --group mlx failed");
+          issues.push("Run `uv sync --group mlx` from the repo root to install mlx-embeddings");
         }
       } else {
-        row(
-          warn,
-          "No recommended model (memory too low) — skipping model check"
-        );
+        issues.push("Run `uv sync --group mlx` from the repo root to install mlx-embeddings");
+      }
+    }
+  } else if (IS_WIN) {
+    // Windows: vllm-windows (pre-built NVIDIA wheel, installed manually)
+    const hasNvidia =
+      spawnSync("nvidia-smi", [], { stdio: "ignore" }).status === 0 ||
+      spawnSync("powershell", ["-NoProfile", "-Command",
+        "(Get-CimInstance Win32_VideoController).Name -match 'NVIDIA'"],
+        { stdio: "ignore" }).status === 0;
+    if (hasNvidia) {
+      row(warn, "vllm-windows not running");
+      row(arrow, "Download the wheel from: https://github.com/SystemPanic/vllm-windows/releases");
+      row(arrow, "Install into venv:  uv pip install <path-to-wheel.whl>");
+      row(arrow, "Then start Engram:  bun run start");
+      issues.push("Install vllm-windows: https://github.com/SystemPanic/vllm-windows/releases");
+    } else {
+      row(warn, "No NVIDIA GPU detected — vLLM requires NVIDIA GPU on Windows");
+      issues.push("vLLM on Windows requires an NVIDIA GPU");
+    }
+  } else {
+    // Linux: vLLM via uv
+    if (vllmInVenv()) {
+      const ver = vllmVersion();
+      row(ok, `vllm ${ver ?? ""} (venv, not running)`);
+      row(arrow, "Will auto-start when you run: bun run start");
+    } else {
+      row(warn, "vllm not installed in venv");
+      const doInstall = await confirm("Install vllm via uv? (may take several minutes)");
+      if (doInstall) {
+        console.log();
+        const success = runInherit("uv", ["sync", "--group", "vllm"]);
+        if (success) {
+          const ver = vllmVersion();
+          row(ok, `vllm ${ver ?? ""} installed into .venv`);
+        } else {
+          row(fail, "uv sync --group vllm failed");
+          issues.push("Run `uv sync --group vllm` manually from the repo root");
+        }
+      } else {
+        issues.push("Run `uv sync --group vllm` from the repo root to install vllm");
       }
     }
   }
 
-  // ── 5. ChromaDB (via uv + venv) ──────────────────────────────────────────────
+  // ── 5. Image captioning (Ollama) ─────────────────────────────────────────────
+  section("Image captioning (optional)");
+
+  const captioningEnabled = Boolean((cfg2 as any)?.captioning?.host);
+  const captionHost = (cfg2 as any)?.captioning?.host ?? "http://localhost:11434/v1";
+  const captionProvider = (cfg2 as any)?.captioning?.provider ?? "auto";
+  const captionLooksOllama = (() => {
+    try {
+      const url = new URL(captionHost);
+      return url.port === "11434" || /ollama/i.test(url.hostname);
+    } catch {
+      return false;
+    }
+  })();
+  const useOllama = captionProvider === "ollama" || (captionProvider === "auto" && captionLooksOllama);
+
+  if (captioningEnabled) {
+    if (useOllama) {
+      try {
+        const res = await fetch(captionHost.replace(/\/v1$/, ""), { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          row(ok, `Ollama running at ${captionHost.replace(/\/v1$/, "")}`);
+        } else {
+          row(warn, `Ollama at ${captionHost.replace(/\/v1$/, "")} returned status ${res.status}`);
+        }
+      } catch {
+        row(warn, `Ollama not reachable at ${captionHost.replace(/\/v1$/, "")} — image captions will fall back to filenames`);
+        row(arrow, "Start Ollama with: ollama serve");
+      }
+    } else {
+      row(ok, `Captioning provider: ${captionProvider} (${captionHost})`);
+    }
+    const captionModel = (cfg2 as any)?.captioning?.model ?? "engram-caption";
+    row(arrow, `Caption model: ${c.bold}${captionModel}${c.reset}`);
+    if (useOllama) {
+      row(arrow, `First run will auto-download ${c.bold}Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf${c.reset}`);
+      row(arrow, `Then it creates a local source model and aliases it to ${c.bold}${captionModel}${c.reset}`);
+      row(arrow, `If your Ollama build can't load that GGUF, it falls back to ${c.bold}qwen2.5vl:3b${c.reset}`);
+    }
+  } else {
+    const ollamaInstalled = cmdExists("ollama");
+    if (ollamaInstalled) {
+      row(arrow, `Ollama installed — captioning is ${c.dim}disabled${c.reset}`);
+      row(arrow, `Enable by adding to config.json:`);
+      console.log(`    ${c.cyan}"captioning": { "host": "http://localhost:11434/v1" }${c.reset}`);
+      console.log(`    ${c.dim}Then run: bun run start (auto-downloads Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf)${c.reset}`);
+    } else {
+      row(arrow, `Ollama not installed — image captions disabled (filenames used instead)`);
+      row(arrow, `Install from: ${c.bold}https://ollama.com${c.reset}`);
+    }
+  }
+
+  // ── 6. ChromaDB (via uv + venv) ──────────────────────────────────────────────
   section("ChromaDB");
 
   if (!cmdExists("uv")) {
@@ -803,7 +851,45 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── 7. HTTPS (required for Claude Code Desktop connector UI) ─────────────────
+  // ── 7. mutool (required for PDF rendering) ───────────────────────────────────
+  section("mutool (PDF renderer)");
+
+  const mutoolFound = cmdExists("mutool");
+  if (mutoolFound) {
+    const mutoolVersion = runCapture("mutool", ["-v"]) ?? "found";
+    row(ok, `mutool ${mutoolVersion}`);
+  } else {
+    row(fail, "mutool not found — PDF and Office document indexing will not work");
+    if (IS_MAC) {
+      row(arrow, "Install with: brew install mupdf-tools");
+    } else if (IS_LINUX) {
+      row(arrow, "Install with: sudo apt install mupdf-tools");
+    } else if (IS_WIN) {
+      row(arrow, "Download from: https://mupdf.com/releases/");
+    }
+    issues.push("Install mutool (mupdf-tools) to enable PDF and Office document indexing");
+  }
+
+  // ── 9. LibreOffice (optional, for .docx/.pptx/.xlsx indexing) ───────────────
+  section("LibreOffice (optional)");
+
+  const loFound = cmdExists("libreoffice") || cmdExists("soffice");
+  if (loFound) {
+    const loVersion = runCapture("libreoffice", ["--version"]) ?? runCapture("soffice", ["--version"]);
+    row(ok, `LibreOffice found${loVersion ? `: ${loVersion}` : ""}`);
+  } else {
+    row(warn, "LibreOffice not found — .docx/.pptx/.xlsx files will be skipped by the watcher");
+    if (IS_MAC) {
+      row(arrow, "Install with: brew install --cask libreoffice");
+    } else if (IS_LINUX) {
+      row(arrow, "Install with: sudo apt install libreoffice  (or your distro's package manager)");
+    } else if (IS_WIN) {
+      row(arrow, "Download from: https://www.libreoffice.org/download/download/");
+    }
+    row(arrow, "Or set watcher.libreOfficePath in config.json to a custom path");
+  }
+
+  // ── 10. HTTPS (required for Claude Code Desktop connector UI) ─────────────────
   section("HTTPS");
 
   let httpsEnabled = certsExist();
@@ -852,7 +938,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── 8. Tool integration (skills + MCP) ───────────────────────────────────────
+  // ── 11. Tool integration (skills + MCP) ───────────────────────────────────────
   section("Agent tool integration");
   issues.push(...installSkillsAndMcp());
 
@@ -865,9 +951,7 @@ async function main(): Promise<void> {
   if (issues.length === 0) {
     console.log(`  ${ok} ${c.bold}${c.green}All checks passed!${c.reset}`);
     console.log(`\n  Start Engram with:`);
-    const startCmd = IS_WIN
-      ? "bun scripts/setup.ts && bun server/src/index.ts"
-      : "./scripts/start.sh";
+    const startCmd = "bun run start";
     console.log(`  ${c.bold}${c.cyan}${startCmd}${c.reset}`);
   } else {
     console.log(

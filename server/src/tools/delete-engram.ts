@@ -21,7 +21,7 @@ export async function deleteEngram(
   if (!location) throw new Error(`Engram not found: ${input.id}`);
 
   // Delete the vault file.
-  unlinkSync(join(vault.root, location.date, location.filename));
+  unlinkSync(join(vault.root, location.relativePath));
 
   // Remove from ChromaDB.
   await chroma.delete(input.id);
@@ -31,8 +31,7 @@ export async function deleteEngram(
 
   return {
     id: input.id,
-    date: location.date,
-    filename: location.filename,
-    message: `Deleted: ${location.date}/${location.filename} [${input.id}]`,
+    relativePath: location.relativePath,
+    message: `Deleted: ${location.relativePath} [${input.id}]`,
   };
 }

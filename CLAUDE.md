@@ -4,14 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Engram is a provider-agnostic AI memory database. Conversations are saved as dated markdown files in an Obsidian vault, embedded via Qwen3-Embedding into ChromaDB, and retrieved through an MCP server. The vault is fully readable in Obsidian including graph view via `[[wikilinks]]`.
+Engram is a multimodal AI memory database. Memories are saved as markdown files in an Obsidian vault (at arbitrary folder depths), embedded via Qwen3-VL-Embedding-8B into ChromaDB, and retrieved through an MCP server. The vault is fully readable in Obsidian including graph view via `[[wikilinks]]`. The file watcher enables bidirectional sync — edits in Obsidian are automatically re-indexed.
 
 ## Commands
 
 ```bash
 bun scripts/setup.ts      # Interactive onboarding — checks prerequisites, detects hardware, sets up config
-bun run start              # Starts ChromaDB + Engram server (cross-platform)
-./scripts/start.sh         # Same, macOS/Linux only
+bun scripts/migrate.ts    # Re-embed all engrams after model/dimension changes
+bun run start              # Starts ChromaDB + embedding server + Ollama (if configured) + Engram server
+bun run re-embed           # Same, but forces re-embedding of ALL vault files (markdown + media)
+bun scripts/start.ts --re-embed  # Direct invocation with re-embed flag
 cd server && bun run dev   # Dev server with --watch
 cd server && bun test      # Run test suite
 ```
@@ -21,64 +23,91 @@ There is no lint or typecheck command configured.
 ## Architecture
 
 ```
-Obsidian Vault (YYYY-MM-DD/title.md)
-      ↕ read/write
+Obsidian Vault (any/folder/path/title.md)
+      ↕ read/write + file watcher
   Engram MCP Server (Bun, HTTP/HTTPS, default port 7384)
       ↕ embed / search
     ChromaDB (port 8000)
       ↑
-  Embedding Model (Qwen3-Embedding via Ollama / NVIDIA vLLM / OpenAI)
+  vLLM (port 8001) — Qwen3-VL-Embedding-2B (text, images, video, PDFs)
+      ↑ (optional, for captioning)
+  Ollama (port 11434) — Qwen3.5-4B (image captioning; macOS: qwen3.5:4b-nvfp4 MLX, other: Unsloth GGUF via ollama create)
 ```
 
 ### Server entry point
 
-`server/src/index.ts` — Bun HTTP server with session-based MCP transport. Each MCP client gets its own `McpServer` + `WebStandardStreamableHTTPServerTransport` pair, keyed by session ID. The expensive singletons (embedder, ChromaDB client, vault, vaultIndex) are shared across sessions. The server auto-starts Ollama if it's not running (when not using OpenAI).
+`server/src/index.ts` — Bun HTTP server with session-based MCP transport. Each MCP client gets its own `McpServer` + `WebStandardStreamableHTTPServerTransport` pair, keyed by session ID. The expensive singletons (embedder, ChromaDB client, vault, vaultIndex, bodyHashRegistry) are shared across sessions. vLLM must be running before the server starts — it polls the health endpoint and exits with instructions if unreachable.
 
-On startup, after ChromaDB is ready, the server builds the `VaultIndex` and runs a re-index pass: any engram present in the vault but missing from ChromaDB is re-embedded and upserted. This makes the system self-healing after renames, fresh clones, or partial data loss.
+On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a dimension validation check, loads the body hash registry, and runs a re-index pass: any engram present in the vault but missing from ChromaDB is re-embedded and upserted. After re-index, the file watcher starts monitoring vault changes.
 
 ### Key modules (all in `server/src/`)
 
 | Module | Purpose |
 |---|---|
-| `config.ts` | Zod-validated config loading from `config.json` / `config.local.json` |
-| `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. |
-| `vault-index.ts` | `VaultIndex` — scans vault frontmatter at startup to build a UUID→filepath map; `resolveWithFallback` handles mid-session renames and deletes stale ChromaDB entries for missing files |
-| `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata` (metadata-only update, no re-embed), `searchByEmbedding` (neighbor lookup for clustering) |
-| `wikilinks.ts` | Bidirectional `[[wikilinks]]` between semantically similar engrams. Takes `chromaId` (UUID, for self-exclusion) and `wikiPath` (date/filename, for link text) as separate params |
-| `embeddings/index.ts` | Provider factory — `createEmbeddingProvider()` dispatches to Ollama, NVIDIA vLLM, or OpenAI based on config + hardware |
-| `embeddings/cache.ts` | `LRUEmbeddingCache` — in-process LRU cache for query embeddings. Used by `search_memory` to skip re-embedding repeated queries. Size configurable via `embedding.queryCacheSize` |
-| `embeddings/ollama.ts` | Ollama `/api/embed` client |
-| `embeddings/openai-compat.ts` | OpenAI `/v1/embeddings` client (also used for NVIDIA vLLM) |
+| `config.ts` | Zod-validated config loading from `config.json` / `config.local.json`. Embedding config is simplified: `vllm.host` + optional `quant` override. Optional `captioning` block for image captioning (Ollama endpoint, model, prompt). |
+| `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. All file operations use vault-relative paths. |
+| `vault-index.ts` | `VaultIndex` — recursive scan builds UUID→relativePath map with reverse lookup. UUID collision detection reassigns duplicates via `matter.stringify`. `resolveWithFallback` handles mid-session renames. Skips `.` hidden dirs and `_chunks/` sentinel path. |
+| `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata`, `searchByEmbedding`, `getDimensions`. Metadata includes `relativePath` and optional `parentEngramId` (for chunk entries). |
+| `wikilinks.ts` | Bidirectional `[[wikilinks]]` between semantically similar engrams. Wiki paths derived from `relativePath`. |
+| `embeddings/index.ts` | Provider factory — `createEmbeddingProvider()` connects to vLLM with health check and hardware-aware quantization selection |
+| `embeddings/qwen-vl.ts` | `QwenVLProvider` — multimodal embedding via vLLM `/v1/embeddings`. Supports text, images, video, PDFs. 2048-dim output. |
+| `embeddings/cache.ts` | `LRUEmbeddingCache` — in-process LRU cache for query embeddings. Size configurable via `embedding.queryCacheSize` |
+| `embeddings/types.ts` | `EmbeddingProvider` interface with `embed(string | MultimodalInput)`, `capabilities()`, `expectedDimensions()` |
 | `hardware/detect.ts` | Detects Apple Silicon, NVIDIA (Blackwell vs older), or CPU |
-| `hardware/memory.ts` | Steps through model variants (8B→4B, q8→q4) to fit available memory |
-| `dilucidate/cluster.ts` | Core clustering algorithm. ≤300 engrams: exact O(n²) pairwise cosine similarity. >300 engrams: O(n·k) neighbor search via `chroma.searchByEmbedding` (k=15, approximate). Connected-components BFS + missing wikilink detection shared by both paths |
-| `tools/save-memory.ts` | Generates UUID, embeds content, writes engram, upserts to ChromaDB |
-| `tools/search-memory.ts` | Search with `mode`: `"semantic"` (default, vector similarity), `"keyword"` (vault scan via `search/keyword.ts`), `"hybrid"` (0.7 semantic + 0.3 keyword merge). LRU cache skips re-embedding repeated queries |
-| `search/keyword.ts` | In-process keyword search: tokenizes query, filters on title+abstract, reads body only for candidates. Returns scored results with excerpt anchored at first match |
-| `tools/delete-engram.ts` | Permanently deletes an engram — removes vault file, ChromaDB entry, and VaultIndex entry |
-| `tools/read-engram.ts` | Resolves UUID via VaultIndex, reads file |
-| `tools/list-engrams.ts` | Lists engrams from vault with frontmatter-parsed titles, IDs, and abstracts — no file body reads |
-| `tools/update-engram.ts` | Updates an existing engram in-place: `setAbstract`, `addTags`, `setContent` (re-embeds), `addWikilinks`. Uses `gray-matter` for parse→mutate→reformat via `formatEngram` |
+| `hardware/memory.ts` | Steps through Qwen3-VL-Embedding-2B quant variants (Q8→Q6→Q4→NVFP4) to fit available memory |
+| `body-hash.ts` | `BodyHashRegistry` — SHA256 body hash dedup. Stored in `.engram-body-hashes.json` at vault root. |
+| `media-processor.ts` | Multimodal file processing (PDF, Office, images, video). PDF: mutool screenshot per page (200 DPI) + pdfjs text extraction; each page produces two embeddings — image (visual) and text (semantic). `imageEmbedding` may be null if embedding server doesn't support multimodal input. Office: LibreOffice → PDF → same pipeline. `PdfPageResult` has `imageEmbedding` (nullable), `textEmbedding`, and `extractedText`. |
+| `media-cache.ts` | `MediaCache` — in-process cache for media processing to avoid redundant work. Persists to `.engram-media-cache.json`. |
+| `captioning.ts` | `captionImage()` — calls Ollama `/chat/completions` with base64 image and prompt. Returns caption or `null` on failure. Optional; only active when `captioning` config block is set. |
+| `scripts/ensure-ollama.ts` | Platform-aware Ollama provisioning. macOS: `ollama pull qwen3.5:4b-nvfp4` + `ollama cp` to alias as config model name. Other: download Unsloth GGUF from HuggingFace + `ollama create`. Checks if model already exists before pulling/creating. |
+| `watcher.ts` | `startVaultWatcher()` — Bun `fs.watch` recursive with 200ms debounce. Handles `.md` upsert/delete with UUID assignment, collision detection, body hash dedup. Media file support via media cache. Image captioning when `config.captioning` is set. |
+| `dilucidate/cluster.ts` | Core clustering algorithm. ≤300 engrams: exact O(n²) pairwise cosine similarity. >300 engrams: O(n·k) neighbor search. Connected-components BFS + missing wikilink detection |
+| `tools/save-memory.ts` | Generates UUID, embeds content, writes engram to configurable folder, upserts to ChromaDB. Optional `folder` parameter for vault-relative path. |
+| `tools/search-memory.ts` | Search with `mode`: `"semantic"`, `"keyword"`, `"hybrid"`. LRU cache skips re-embedding repeated queries. `caller` param for reranker integration. Surfaces `isChunk`/`parentEngramId` for chunk results. |
+| `tools/read-engram.ts` | Returns structured `EngramContent { id, title, date, type?, tags, body, wikilinks }` via `extractEngramContent` helper |
+| `tools/read-engrams.ts` | Batch read tool — up to 20 UUIDs in one call. 80K char response size guard with truncation. |
+| `tools/update-engram.ts` | Updates in-place: `setAbstract`, `setContent` (re-embeds), `editContent` (targeted string replacement, re-embeds), `addTags`, `addWikilinks`. Shared `reformatEngram` helper. Warns about stale chunks when content is updated. |
+| `tools/delete-engram.ts` | Permanently deletes — removes vault file, ChromaDB entry, VaultIndex entry, body hash |
+| `tools/list-engrams.ts` | Lists from vault with frontmatter-parsed titles, IDs, abstracts, types, relativePaths |
+| `tools/vault-structure.ts` | `getVaultStructure()` — directory tree with depth limiting. `sanitizeFolderPath()` with path traversal protection. |
+| `tools/chunk-engram.ts` | `chunk_engram` MCP tool — splits long engrams into individually-embedded segments. Modes: `create` (errors if chunks exist), `re-embed` (deletes old + recreates). Separators: `paragraph`, `sentence`, `none` (fixed-size). Stores chunk index in `.engram-chunks/{id}.json`. Each chunk has `type: "chunk"` and `parentEngramId` in ChromaDB. |
 | `tools/context.ts` | Read/write IMPORTANT.md |
 | `tools/dilucidate/cluster.ts` | `cluster_memories` MCP tool — wraps the clustering algorithm |
-| `tools/dilucidate-meta.ts` | Read/write `.dilucidate-meta.json` for `/dilucidate` run state |
+| `tools/dilucidate-meta.ts` | Structured read/write `.dilucidate-meta.json` — server-side merge with 50-entry history cap |
 | `logger.ts` | Winston logger → console + `logs/engram.log` + `logs/error.log` |
+
+### Architectural patterns
+
+- **Session-based MCP transport**: Each client gets isolated `McpServer` + `WebStandardStreamableHTTPServerTransport` pairs, sharing expensive singletons (embedder, ChromaDB, vault, vaultIndex, bodyHashRegistry)
+- **UUID-based identity**: Stable IDs in frontmatter survive renames; VaultIndex maintains UUID↔relativePath bidirectional mapping
+- **Dual storage strategy**: Abstract stored in both vault frontmatter and ChromaDB metadata for scalability (no body reads needed for list/search)
+- **Body hash deduplication**: SHA256 registry prevents duplicate embeddings; handles file watcher self-triggering
+- **Two-mode clustering**: O(n²) exact for ≤300 engrams, O(n·k) approximate (K=15 neighbors) for larger vaults
+- **Hybrid search**: Semantic (vector), keyword (exact terms), or hybrid (0.7×semantic + 0.3×keyword merge) with LRU cache on query embeddings
+- **Hardware-aware quantization**: Auto-selects model variant based on platform (Apple Silicon → MLX, NVIDIA Blackwell → NVFP4, older NVIDIA → GGUF cascade, CPU fallback)
+- **Wikilink backlink generation**: When linking A→B, also writes B→A backlink to both files
+
+### Complexity hotspots
+
+1. **Startup re-indexing** (`index.ts`:106-203): Multi-phase orchestration handling UUID assignment, missing files, and path/title drift. Multiple code paths interacting with vault, ChromaDB, vaultIndex.
+2. **File watcher upsert** (`watcher.ts` handleMdUpsert): Implicit state machine with branches for UUID assignment, rename detection, collision, and dedup.
+3. **PDF processing** (`media-processor.ts` processPdf): Two embeddings per page — text (pdfjs extraction, always present) and image (mutool draw at 200 DPI, may be null if embedding server doesn't support multimodal). ChromaDB gets two entries per page: `{hash}-page-{N}-txt` (text embedding) and `{hash}-page-{N}` (image embedding, only if `imageEmbedding` succeeded). Both entries store `extractedText` in `content`/`abstract` for keyword search and readable excerpts.
+4. **Clustering wikilink detection** (`dilucidate/cluster.ts`): Combines BFS, similarity thresholding, and vault file reads. Vault read for every pair in cluster is performance-sensitive.
 
 ### Data flow for `save_memory`
 
 1. `crypto.randomUUID()` — generates a stable ID stored in frontmatter
-2. `embedder.embed(content)` — single embedding of the body text
-3. `generateAndApplyWikilinks(chromaId, wikiPath, ...)` — searches ChromaDB for similar engrams, writes backlinks into existing vault files using vault paths (not UUIDs)
-4. `vault.writeEngram()` — writes markdown with YAML frontmatter (`id`, `abstract`, `title`, `date`, `type`, `tags`) + `## Related Memories` section
-5. `chroma.upsert()` — indexes embedding + metadata in ChromaDB, keyed by UUID
-
-Note: `abstract` is stored in **both** the vault frontmatter and in ChromaDB metadata. `list_engrams` reads it from the vault (no ChromaDB call needed). `search_memory` returns it from ChromaDB metadata alongside each result. When `update_engram` sets a new abstract, it updates both the vault file and ChromaDB via `patchMetadata` (no re-embedding).
+2. `embedder.embed(content, { taskInstruction })` — single embedding of the body text with retrieval prefix
+3. `generateAndApplyWikilinks(chromaId, wikiPath, ...)` — searches ChromaDB for similar engrams, writes backlinks
+4. `vault.writeEngram(dir, title, content)` — writes markdown with YAML frontmatter + `## Related Memories` section. `dir` is either the `folder` param or today's date.
+5. `vaultIndex.set(id, { relativePath })` — registers in the vault index
+6. `chroma.upsert()` — indexes embedding + metadata (including `relativePath`) in ChromaDB
 
 ### Engram identity
 
-Each engram has a **UUID** stored in its frontmatter (`id: "..."`). This is the stable identity used by ChromaDB and all MCP tools. Filenames use the title as-is (spaces, capitals, and symbols preserved — only filesystem-invalid characters stripped). Wikilinks use vault paths (`[[date/filename]]`) so Obsidian's graph view stays human-readable. Because the UUID lives inside the file, Obsidian can rename files freely without breaking the index.
+Each engram has a **UUID** stored in its frontmatter (`id: "..."`). This is the stable identity used by ChromaDB and all MCP tools. The **relativePath** (vault-relative file path) is the canonical location reference used by all tools. Wikilinks use vault paths (`[[folder/filename]]`) so Obsidian's graph view stays human-readable.
 
-Each engram also carries an **abstract** in frontmatter — a required paragraph (3–6 sentences) summarising the key content. The abstract is stored in both the vault file and ChromaDB metadata. `list_engrams` returns it from the vault (no ChromaDB call); `search_memory` returns it from ChromaDB alongside results. This dual storage means skills can do a cheap full-vault first pass via `list_engrams` without `read_engram` calls, and search results carry enough context to avoid a follow-up read in most cases. This is the primary scalability mechanism for skills like `/update-important-memory` and `/dilucidate`.
+Each engram carries an **abstract** in frontmatter — a required paragraph summarising the key content. Stored in both vault and ChromaDB metadata. `list_engrams` returns it from the vault; `search_memory` returns it from ChromaDB. This dual storage is the primary scalability mechanism.
 
 ### Config resolution
 
@@ -96,7 +125,7 @@ All skill output — engram content, IMPORTANT.md, search queries — is enforce
 ### External dependencies
 
 - **ChromaDB**: Python venv managed by `uv` (see `pyproject.toml`). Data stored in `.chroma-data/`.
-- **Ollama**: Serves Qwen3-Embedding locally. The server auto-starts `ollama serve` if needed.
+- **vLLM**: Serves Qwen3-VL-Embedding-2B (2048-dim, multimodal). Must be started separately before Engram.
 - **Bun**: Runtime for the MCP server. No Node.js dependency.
 
 ## Runtime: Bun, not Node
@@ -113,4 +142,17 @@ Tests use Bun's built-in test runner (`bun:test`) — no additional framework. R
 
 **What to test:** Pure functions (`vault.ts` parsing/formatting, `cache.ts`, `cluster.ts` math, `memory.ts` model selection), tool handlers with mocked deps, config schema validation, edge cases.
 
-**What not to test:** `index.ts` (wiring), embedding provider HTTP clients (`ollama.ts`, `openai-compat.ts`), `hardware/detect.ts` (platform-specific). These are thin wrappers where unit tests add no confidence.
+**What not to test:** `index.ts` (wiring), embedding provider HTTP clients, `hardware/detect.ts` (platform-specific). These are thin wrappers where unit tests add no confidence.
+
+### Test coverage
+
+**Strengths**: LRU cache, clustering algorithm, search-memory, media processing, keyword search
+
+**Gaps**:
+- Vault index: Rename handling and collision detection
+- Wikilinks: Backlink generation
+- File watcher: Markdown upsert logic (complex state machine)
+- Startup: End-to-end dimension validation flow
+- Error recovery: Network errors, file corruption
+- Concurrent access: File watcher + tool call race conditions
+- Media processing: PDF/Office conversion edge cases

@@ -7,9 +7,11 @@ export interface EngramRecord {
   title: string;
   date: string;
   filename: string;
+  relativePath: string;
   vaultPath: string;
   abstract?: string;
   type?: string;
+  parentEngramId?: string;
 }
 
 export interface SearchResult {
@@ -17,10 +19,12 @@ export interface SearchResult {
   title: string;
   date: string;
   filename: string;
+  relativePath: string;
   excerpt: string;
   similarity: number;
   abstract?: string;
   type?: string;
+  parentEngramId?: string;
 }
 
 export class EngramChroma {
@@ -29,11 +33,24 @@ export class EngramChroma {
   private collectionName: string;
 
   constructor(config: Config) {
-    this.client = new ChromaClient({ path: config.chroma.host });
+    const url = new URL(config.chroma.host);
+    this.client = new ChromaClient({
+      host: url.hostname,
+      port: parseInt(url.port) || (url.protocol === "https:" ? 443 : 8000),
+      ssl: url.protocol === "https:",
+    });
     this.collectionName = config.chroma.collection;
   }
 
   async init(): Promise<void> {
+    this.collection = await this.client.getOrCreateCollection({
+      name: this.collectionName,
+      metadata: { "hnsw:space": "cosine" },
+    });
+  }
+
+  async recreate(): Promise<void> {
+    await this.client.deleteCollection({ name: this.collectionName });
     this.collection = await this.client.getOrCreateCollection({
       name: this.collectionName,
       metadata: { "hnsw:space": "cosine" },
@@ -50,10 +67,12 @@ export class EngramChroma {
       title: record.title,
       date: record.date,
       filename: record.filename,
+      relativePath: record.relativePath,
       vaultPath: record.vaultPath,
     };
     if (record.abstract) metadata.abstract = record.abstract;
     if (record.type) metadata.type = record.type;
+    if (record.parentEngramId) metadata.parentEngramId = record.parentEngramId;
 
     await this.col.upsert({
       ids: [record.id],
@@ -98,10 +117,12 @@ export class EngramChroma {
       title: (metadatas[i]?.title as string) ?? id,
       date: (metadatas[i]?.date as string) ?? "",
       filename: (metadatas[i]?.filename as string) ?? "",
+      relativePath: (metadatas[i]?.relativePath as string) ?? `${(metadatas[i]?.date as string) ?? ""}/${(metadatas[i]?.filename as string) ?? ""}`,
       excerpt: truncate(documents[i] ?? "", 300),
       similarity: 1 - (distances[i] ?? 1),
       abstract: (metadatas[i]?.abstract as string) ?? undefined,
       type: (metadatas[i]?.type as string) ?? undefined,
+      parentEngramId: (metadatas[i]?.parentEngramId as string) ?? undefined,
     }));
   }
 
@@ -117,10 +138,12 @@ export class EngramChroma {
       title: (results.metadatas[i]?.title as string) ?? id,
       date: (results.metadatas[i]?.date as string) ?? "",
       filename: (results.metadatas[i]?.filename as string) ?? "",
+      relativePath: (results.metadatas[i]?.relativePath as string) ?? `${(results.metadatas[i]?.date as string) ?? ""}/${(results.metadatas[i]?.filename as string) ?? ""}`,
       excerpt: truncate(results.documents[i] ?? "", 300),
       similarity: 1,
       abstract: (results.metadatas[i]?.abstract as string) ?? undefined,
       type: (results.metadatas[i]?.type as string) ?? undefined,
+      parentEngramId: (results.metadatas[i]?.parentEngramId as string) ?? undefined,
     }));
   }
 
@@ -130,13 +153,13 @@ export class EngramChroma {
     nResults: number,
     excludeId: string,
     dateRange?: { from?: string; to?: string }
-  ): Promise<Array<{ id: string; similarity: number; date: string; filename: string; title: string }>> {
+  ): Promise<Array<{ id: string; similarity: number; date: string; filename: string; relativePath: string; title: string }>> {
     // Fetch one extra to account for the self-match being filtered out.
     const results = await this.search(queryEmbedding, nResults + 1, dateRange);
     return results
       .filter((r) => r.id !== excludeId)
       .slice(0, nResults)
-      .map((r) => ({ id: r.id, similarity: r.similarity, date: r.date, filename: r.filename, title: r.title }));
+      .map((r) => ({ id: r.id, similarity: r.similarity, date: r.date, filename: r.filename, relativePath: r.relativePath, title: r.title }));
   }
 
   async delete(id: string): Promise<void> {
@@ -148,11 +171,19 @@ export class EngramChroma {
     return result.ids ?? [];
   }
 
+  /** Detect the embedding dimension of the first stored vector, or null if the collection is empty. */
+  async getDimensions(): Promise<number | null> {
+    const result = await this.col.get({ limit: 1, include: ["embeddings"] as any });
+    const emb = (result as any).embeddings?.[0];
+    return emb ? emb.length : null;
+  }
+
   async getAllWithEmbeddings(dateRange?: { from?: string; to?: string }): Promise<Array<{
     id: string;
     embedding: number[];
     date: string;
     filename: string;
+    relativePath: string;
     title: string;
   }>> {
     const where = buildWhere(dateRange);
@@ -171,6 +202,7 @@ export class EngramChroma {
         embedding: embeddings[i] ?? [],
         date: (metadatas[i]?.date as string) ?? "",
         filename: (metadatas[i]?.filename as string) ?? "",
+        relativePath: (metadatas[i]?.relativePath as string) ?? `${(metadatas[i]?.date as string) ?? ""}/${(metadatas[i]?.filename as string) ?? ""}`,
         title: (metadatas[i]?.title as string) ?? id,
       }))
       .filter((item) => item.embedding.length > 0);

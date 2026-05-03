@@ -38,6 +38,8 @@ Aim for focused, searchable topics — not one giant dump, not trivially small f
 
 ## Phase 3 — Write and save
 
+Before saving, call `get_vault_structure` once to understand the existing folder organization. Choose an appropriate `folder` for each engram that matches existing conventions (e.g. "projects/Engram"). If no relevant folder exists, omit `folder` to use the default date-based path.
+
 For each topic, compose a self-contained Engram and call `save_memory`:
 
 - **`title`**: 3–8 words, specific enough to be findable. Good: "Engram Server — Ollama Lifecycle Design". Poor: "Technical discussion".
