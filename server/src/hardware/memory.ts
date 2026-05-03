@@ -53,8 +53,11 @@ const AVG_ITEM_CHARS = 2_000;
 
 export function deriveBatchLimits(availableMemoryGB: number): { batchSize: number; batchMaxChars: number } {
   const budgetGB = Math.max(0.5, availableMemoryGB - MODEL_OVERHEAD_GB);
-  const batchMaxChars = Math.round(budgetGB * KV_CHARS_PER_GB);
-  const batchSize = Math.min(256, Math.max(1, Math.round(batchMaxChars / AVG_ITEM_CHARS)));
+  // Cap batch limits to prevent embedding server memory spikes.
+  // Even on high-memory systems, the server can only process a limited
+  // number of texts in parallel before activation memory dominates.
+  const batchMaxChars = Math.min(50_000, Math.round(budgetGB * KV_CHARS_PER_GB));
+  const batchSize = Math.min(8, Math.max(1, Math.round(batchMaxChars / AVG_ITEM_CHARS)));
   return { batchSize, batchMaxChars };
 }
 

@@ -75,35 +75,36 @@ describe("selectModel", () => {
 });
 
 describe("deriveBatchLimits", () => {
-  test("scales up with more memory", () => {
+  test("scales batchMaxChars with memory up to 50k cap", () => {
     const small = deriveBatchLimits(4);
     const large = deriveBatchLimits(16);
     expect(large.batchMaxChars).toBeGreaterThan(small.batchMaxChars);
-    expect(large.batchSize).toBeGreaterThan(small.batchSize);
+    expect(small.batchMaxChars).toBeLessThanOrEqual(50_000);
+    expect(large.batchMaxChars).toBe(50_000); // hits cap at 16 GB
   });
 
-  test("batchSize is always between 1 and 256", () => {
+  test("batchSize is always between 1 and 8", () => {
     for (const gb of [1, 4, 8, 16, 32, 64]) {
       const { batchSize } = deriveBatchLimits(gb);
       expect(batchSize).toBeGreaterThanOrEqual(1);
-      expect(batchSize).toBeLessThanOrEqual(256);
+      expect(batchSize).toBeLessThanOrEqual(8);
     }
   });
 
-  test("batchMaxChars is always positive", () => {
+  test("batchMaxChars is always positive and capped at 50k", () => {
     expect(deriveBatchLimits(0).batchMaxChars).toBeGreaterThan(0);
     expect(deriveBatchLimits(0.5).batchMaxChars).toBeGreaterThan(0);
+    expect(deriveBatchLimits(128).batchMaxChars).toBe(50_000);
   });
 
-  test("batchSize is consistent with batchMaxChars (size ≈ chars / 2000)", () => {
+  test("batchSize is consistent with batchMaxChars (size ≈ chars / 2000, capped at 8)", () => {
     const { batchSize, batchMaxChars } = deriveBatchLimits(8);
-    // batchSize should be roughly batchMaxChars / 2000, capped at 256
-    const expected = Math.min(256, Math.round(batchMaxChars / 2_000));
+    const expected = Math.min(8, Math.max(1, Math.round(batchMaxChars / 2_000)));
     expect(batchSize).toBe(expected);
   });
 
-  test("caps batchSize at 256 for very large memory", () => {
-    expect(deriveBatchLimits(128).batchSize).toBe(256);
+  test("caps batchSize at 8 for very large memory", () => {
+    expect(deriveBatchLimits(128).batchSize).toBe(8);
   });
 
   test("floors budget at 0.5 GB for tiny available memory", () => {
