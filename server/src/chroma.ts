@@ -209,7 +209,7 @@ export class EngramChroma {
   }
 }
 
-function buildWhere(
+export function buildWhere(
   dateRange?: { from?: string; to?: string },
   type?: string
 ): Where | undefined {
@@ -232,6 +232,6 @@ function buildWhere(
   return { $and: conditions };
 }
 
-function truncate(text: string, maxLen: number): string {
+export function truncate(text: string, maxLen: number): string {
   return text.length <= maxLen ? text : `${text.slice(0, maxLen)}…`;
 }

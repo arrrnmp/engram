@@ -316,7 +316,7 @@ export function startVaultWatcher(
   function handleDelete(relativeFilename: string): void {
     const ext = extname(relativeFilename).toLowerCase();
     if (ext === ".md") {
-      handleMdDelete(relativeFilename);
+      handleMdDelete(relativeFilename, vaultIndex, chroma, bodyHashRegistry);
       return;
     }
     if (getMimeType(ext)) {
@@ -324,20 +324,12 @@ export function startVaultWatcher(
     }
   }
 
-  function handleMdDelete(relativeFilename: string): void {
-    const id = vaultIndex.resolveByPath(relativeFilename);
-    if (!id) return;
-    chroma.delete(id).catch((err) => logger.error(`[watcher] Failed to delete ${id} from ChromaDB`, { err }));
-    vaultIndex.remove(id);
-    bodyHashRegistry.removeByPath(relativeFilename);
-    bodyHashRegistry.save();
-    logger.info(`[watcher] Deleted: ${relativeFilename} [${id}]`);
-  }
-
   function handleUpsert(relativeFilename: string, filePath: string): void {
     const ext = extname(relativeFilename).toLowerCase();
     if (ext === ".md") {
-      handleMdUpsert(relativeFilename, filePath);
+      handleMdUpsert(relativeFilename, filePath, vault.root, chroma, embedder, vaultIndex, bodyHashRegistry).catch((err) =>
+        logger.error(`[watcher] Failed to upsert ${relativeFilename}`, { err })
+      );
       return;
     }
     const mimeType = getMimeType(ext);
@@ -347,107 +339,132 @@ export function startVaultWatcher(
     }
   }
 
-  async function handleMdUpsert(relativeFilename: string, filePath: string): Promise<void> {
-    try {
-      const raw = readFileSync(filePath, "utf-8");
-      const parsed = matter(raw);
-
-      // Assign UUID if missing
-      if (!parsed.data.id) {
-        parsed.data.id = crypto.randomUUID();
-        const updated = matter.stringify(parsed.content, parsed.data);
-        writeFileSync(filePath, updated, "utf-8");
-        const rewritten = matter(updated);
-        parsed.data = rewritten.data;
-      }
-
-      const id = parsed.data.id as string;
-
-      // Calculate body hash first — needed for both duplicate detection and UUID collision logic
-      const { body } = parseEngram(raw);
-      const hash = BodyHashRegistry.hashBody(body);
-
-      // Check for duplicate content FIRST (same hash at a different path).
-      // If same content exists elsewhere, skip indexing — it's a duplicate file.
-      const dupCheck = bodyHashRegistry.check(hash, relativeFilename);
-      if (dupCheck.isDuplicate) {
-        // If the canonical path no longer exists the "duplicate" is a moved/renamed file — not a true copy.
-        if (!existsSync(join(vault.root, dupCheck.canonicalPath!))) {
-          bodyHashRegistry.removeByPath(dupCheck.canonicalPath!);
-        } else {
-          logger.warn(`[watcher] Duplicate body: ${relativeFilename} matches ${dupCheck.canonicalPath} — skipping indexing`);
-          return;
-        }
-      }
-
-      // Rename vs collision check (only happens if content is NOT duplicate)
-      const existing = vaultIndex.resolve(id);
-      if (existing && existing.relativePath !== relativeFilename) {
-        const oldFilePath = join(vault.root, existing.relativePath);
-        if (existsSync(oldFilePath)) {
-          // True UUID collision — two different files share the same UUID with different content
-          parsed.data.id = crypto.randomUUID();
-          const rewritten = matter.stringify(parsed.content, parsed.data);
-          writeFileSync(filePath, rewritten, "utf-8");
-          logger.warn(`[watcher] UUID collision: reassigned ${relativeFilename}`);
-          return handleMdUpsert(relativeFilename, filePath);
-        }
-        // Rename — old file gone. Sync title if it matched the old filename stem.
-        const oldStem = basename(existing.relativePath, ".md");
-        const newStem = basename(relativeFilename, ".md");
-        if ((parsed.data.title as string | undefined) === oldStem) {
-          parsed.data.title = newStem;
-          const rewritten = matter.stringify(parsed.content, parsed.data);
-          writeFileSync(filePath, rewritten, "utf-8");
-          logger.info(`[watcher] Title synced on rename: "${oldStem}" → "${newStem}"`);
-        }
-        // Clear stale body hash so the duplicate check below doesn't false-positive.
-        bodyHashRegistry.removeByPath(existing.relativePath);
-      }
-
-      // Atomically register the hash and check if we should proceed.
-      // This eliminates race condition between isRegisteredAt() and add().
-      const hashStatus = bodyHashRegistry.registerIfAbsent(hash, relativeFilename);
-
-      if (hashStatus === "skip") {
-        // Hash already registered at this path. Check if this is a self-trigger event
-        // (watcher's own frontmatter write triggers another event) or a file rename.
-        if (vaultIndex.resolve(id)?.relativePath === relativeFilename) {
-          // Self-trigger - skip
-          return;
-        }
-        // File was renamed/UUID reassigned - continue with re-embedding
-      }
-      if (dupCheck.isDuplicate) {
-        // If the canonical path no longer exists the "duplicate" is a moved/renamed file — not a true copy.
-        if (!existsSync(join(vault.root, dupCheck.canonicalPath!))) {
-          bodyHashRegistry.removeByPath(dupCheck.canonicalPath!);
-        } else {
-          logger.warn(`[watcher] Duplicate body: ${relativeFilename} matches ${dupCheck.canonicalPath} — skipping indexing`);
-          return;
-        }
-      }
-
-      const embedding = await embedder.embed(body, { taskInstruction: "Represent the following document for retrieval: " });
-      await chroma.upsert({
-        id,
-        content: body,
-        title: (parsed.data.title as string) ?? "",
-        date: (parsed.data.date as string) ?? "",
-        filename: relativeFilename.split("/").pop() ?? "",
-        relativePath: relativeFilename,
-        vaultPath: vault.root,
-        abstract: (parsed.data.abstract as string) ?? undefined,
-        type: (parsed.data.type as string) ?? undefined,
-      }, embedding);
-
-      vaultIndex.set(id, { relativePath: relativeFilename });
-      bodyHashRegistry.save();
-      logger.info(`[watcher] Upserted: ${relativeFilename} [${id}]`);
-    } catch (err) {
-      logger.error(`[watcher] Failed to upsert ${relativeFilename}`, { err });
-    }
-  }
-
   logger.info("[engram] Vault watcher started.");
+}
+
+// ── Exported markdown handlers (testable with explicit deps) ──────────────────
+
+export function handleMdDelete(
+  relativeFilename: string,
+  vaultIndex: VaultIndex,
+  chroma: EngramChroma,
+  bodyHashRegistry: BodyHashRegistry,
+): void {
+  const id = vaultIndex.resolveByPath(relativeFilename);
+  if (!id) return;
+  chroma.delete(id).catch((err) => logger.error(`[watcher] Failed to delete ${id} from ChromaDB`, { err }));
+  vaultIndex.remove(id);
+  bodyHashRegistry.removeByPath(relativeFilename);
+  bodyHashRegistry.save();
+  logger.info(`[watcher] Deleted: ${relativeFilename} [${id}]`);
+}
+
+export async function handleMdUpsert(
+  relativeFilename: string,
+  filePath: string,
+  vaultRoot: string,
+  chroma: EngramChroma,
+  embedder: EmbeddingProvider,
+  vaultIndex: VaultIndex,
+  bodyHashRegistry: BodyHashRegistry,
+): Promise<void> {
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = matter(raw);
+
+    // Assign UUID if missing
+    if (!parsed.data.id) {
+      parsed.data.id = crypto.randomUUID();
+      const updated = matter.stringify(parsed.content, parsed.data);
+      writeFileSync(filePath, updated, "utf-8");
+      const rewritten = matter(updated);
+      parsed.data = rewritten.data;
+    }
+
+    const id = parsed.data.id as string;
+
+    // Calculate body hash first — needed for both duplicate detection and UUID collision logic
+    const { body } = parseEngram(raw);
+    const hash = BodyHashRegistry.hashBody(body);
+
+    // Check for duplicate content FIRST (same hash at a different path).
+    // If same content exists elsewhere, skip indexing — it's a duplicate file.
+    const dupCheck = bodyHashRegistry.check(hash, relativeFilename);
+    if (dupCheck.isDuplicate) {
+      // If the canonical path no longer exists the "duplicate" is a moved/renamed file — not a true copy.
+      if (!existsSync(join(vaultRoot, dupCheck.canonicalPath!))) {
+        bodyHashRegistry.removeByPath(dupCheck.canonicalPath!);
+      } else {
+        logger.warn(`[watcher] Duplicate body: ${relativeFilename} matches ${dupCheck.canonicalPath} — skipping indexing`);
+        return;
+      }
+    }
+
+    // Rename vs collision check (only happens if content is NOT duplicate)
+    const existing = vaultIndex.resolve(id);
+    if (existing && existing.relativePath !== relativeFilename) {
+      const oldFilePath = join(vaultRoot, existing.relativePath);
+      if (existsSync(oldFilePath)) {
+        // True UUID collision — two different files share the same UUID with different content
+        parsed.data.id = crypto.randomUUID();
+        const rewritten = matter.stringify(parsed.content, parsed.data);
+        writeFileSync(filePath, rewritten, "utf-8");
+        logger.warn(`[watcher] UUID collision: reassigned ${relativeFilename}`);
+        return handleMdUpsert(relativeFilename, filePath, vaultRoot, chroma, embedder, vaultIndex, bodyHashRegistry);
+      }
+      // Rename — old file gone. Sync title if it matched the old filename stem.
+      const oldStem = basename(existing.relativePath, ".md");
+      const newStem = basename(relativeFilename, ".md");
+      if ((parsed.data.title as string | undefined) === oldStem) {
+        parsed.data.title = newStem;
+        const rewritten = matter.stringify(parsed.content, parsed.data);
+        writeFileSync(filePath, rewritten, "utf-8");
+        logger.info(`[watcher] Title synced on rename: "${oldStem}" → "${newStem}"`);
+      }
+      // Clear stale body hash so the duplicate check below doesn't false-positive.
+      bodyHashRegistry.removeByPath(existing.relativePath);
+    }
+
+    // Atomically register the hash and check if we should proceed.
+    // This eliminates race condition between isRegisteredAt() and add().
+    const hashStatus = bodyHashRegistry.registerIfAbsent(hash, relativeFilename);
+
+    if (hashStatus === "skip") {
+      // Hash already registered at this path. Check if this is a self-trigger event
+      // (watcher's own frontmatter write triggers another event) or a file rename.
+      if (vaultIndex.resolve(id)?.relativePath === relativeFilename) {
+        // Self-trigger - skip
+        return;
+      }
+      // File was renamed/UUID reassigned - continue with re-embedding
+    }
+    if (dupCheck.isDuplicate) {
+      // If the canonical path no longer exists the "duplicate" is a moved/renamed file — not a true copy.
+      if (!existsSync(join(vaultRoot, dupCheck.canonicalPath!))) {
+        bodyHashRegistry.removeByPath(dupCheck.canonicalPath!);
+      } else {
+        logger.warn(`[watcher] Duplicate body: ${relativeFilename} matches ${dupCheck.canonicalPath} — skipping indexing`);
+        return;
+      }
+    }
+
+    const embedding = await embedder.embed(body, { taskInstruction: "Represent the following document for retrieval: " });
+    await chroma.upsert({
+      id,
+      content: body,
+      title: (parsed.data.title as string) ?? "",
+      date: (parsed.data.date as string) ?? "",
+      filename: relativeFilename.split("/").pop() ?? "",
+      relativePath: relativeFilename,
+      vaultPath: vaultRoot,
+      abstract: (parsed.data.abstract as string) ?? undefined,
+      type: (parsed.data.type as string) ?? undefined,
+    }, embedding);
+
+    vaultIndex.set(id, { relativePath: relativeFilename });
+    bodyHashRegistry.save();
+    logger.info(`[watcher] Upserted: ${relativeFilename} [${id}]`);
+  } catch (err) {
+    logger.error(`[watcher] Failed to upsert ${relativeFilename}`, { err });
+  }
 }

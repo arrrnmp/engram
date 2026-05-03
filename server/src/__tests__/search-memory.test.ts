@@ -170,4 +170,65 @@ describe("searchMemory", () => {
     expect("abstract" in result.results[0]).toBe(false);
     expect("type" in result.results[0]).toBe(false);
   });
+
+  // ── Keyword mode ───────────────────────────────────────────────────────────
+
+  test("keyword mode dispatches to keywordSearch", async () => {
+    const vault = mockVault({
+      engrams: [
+        { id: "id-1", title: "Alpha Beta", date: "2026-04-29", filename: "a.md", relativePath: "a.md" },
+      ],
+      readContent: "---\ntitle: \"Alpha Beta\"\n---\nBeta gamma",
+    });
+    const result = await searchMemory(makeInput({ query: "beta", mode: "keyword" }), mockChroma(), mockEmbedder(), vault);
+    expect(result.mode).toBe("keyword");
+    expect(result.results.length).toBe(1);
+    expect(result.results[0].keywordScore).toBeDefined();
+  });
+
+  test("keyword mode returns empty for no matches", async () => {
+    const vault = mockVault({ engrams: [], readContent: "---\n---\n" });
+    const result = await searchMemory(makeInput({ query: "xyz", mode: "keyword" }), mockChroma(), mockEmbedder(), vault);
+    expect(result.results).toEqual([]);
+  });
+
+  // ── Hybrid mode ────────────────────────────────────────────────────────────
+
+  test("hybrid mode merges semantic and keyword results", async () => {
+    const chroma = mockChroma({
+      searchResults: [
+        { id: "semantic-only", title: "S", date: "2026-04-29", filename: "s.md", relativePath: "s.md", excerpt: "E", similarity: 0.9 },
+        { id: "both", title: "B", date: "2026-04-29", filename: "b.md", relativePath: "b.md", excerpt: "E", similarity: 0.8 },
+      ],
+    });
+    const vault = mockVault({
+      engrams: [
+        { id: "both", title: "B query", date: "2026-04-29", filename: "b.md", relativePath: "b.md" },
+        { id: "keyword-only", title: "K query", date: "2026-04-29", filename: "k.md", relativePath: "k.md" },
+      ],
+      readContent: "---\ntitle: \"...\"\n---\nquery match",
+    });
+    const result = await searchMemory(makeInput({ query: "query", mode: "hybrid" }), chroma, mockEmbedder(), vault);
+    expect(result.mode).toBe("hybrid");
+    expect(result.results.length).toBe(3);
+    // "both" should have highest combined score
+    expect(result.results[0].id).toBe("both");
+    expect(result.results[0].score).toBeGreaterThan(result.results[1].score);
+  });
+
+  test("hybrid mode deduplicates overlapping results", async () => {
+    const chroma = mockChroma({
+      searchResults: [
+        { id: "shared", title: "S", date: "2026-04-29", filename: "s.md", relativePath: "s.md", excerpt: "E", similarity: 0.9 },
+      ],
+    });
+    const vault = mockVault({
+      engrams: [{ id: "shared", title: "S query", date: "2026-04-29", filename: "s.md", relativePath: "s.md" }],
+      readContent: "---\ntitle: \"S query\"\n---\nquery",
+    });
+    const result = await searchMemory(makeInput({ query: "query", mode: "hybrid", n_results: 5 }), chroma, mockEmbedder(), vault);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].similarity).toBe(0.9);
+    expect(result.results[0].keywordScore).toBeGreaterThan(0);
+  });
 });

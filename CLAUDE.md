@@ -9,13 +9,15 @@ Engram is a multimodal AI memory database. Memories are saved as markdown files 
 ## Commands
 
 ```bash
-bun scripts/setup.ts      # Interactive onboarding — checks prerequisites, detects hardware, sets up config
-bun scripts/migrate.ts    # Re-embed all engrams after model/dimension changes
-bun run start              # Starts ChromaDB + embedding server + caption server (if configured) + Engram server
-bun run re-embed           # Same, but forces re-embedding of ALL vault files (markdown + media)
-bun scripts/start.ts --re-embed  # Direct invocation with re-embed flag
-cd server && bun run dev   # Dev server with --watch
-cd server && bun test      # Run test suite
+bun scripts/setup.ts                  # Interactive onboarding — checks prerequisites, detects hardware, sets up config
+bun scripts/migrate.ts                # Re-embed all engrams after model/dimension changes
+bun run start                          # Starts ChromaDB + embedding server + caption server (if configured) + Engram server
+bun run re-embed                       # Same, but forces re-embedding of ALL vault files (markdown + media)
+bun scripts/start.ts --re-embed        # Direct invocation with full re-embed flag
+bun scripts/start.ts --re-embed-md     # Re-embed markdown files only
+bun scripts/start.ts --re-embed-pdf    # Re-embed PDF/Office files only
+cd server && bun run dev               # Dev server with --watch
+cd server && bun test                  # Run test suite
 ```
 
 There is no lint or typecheck command configured.
@@ -63,7 +65,9 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a 
 | `scripts/ensure-chroma.ts` | Ensures ChromaDB is reachable on port 8000; starts detached `uv run chroma run` when absent. |
 | `scripts/ensure-embed-server.ts` | Ensures embedding server is reachable on port 8001; launches MLX server on Apple Silicon or vLLM with hardware-aware model args elsewhere. |
 | `scripts/ensure-caption-server.ts` | Ensures captioning backend: launches MLX-LM server on macOS or llama.cpp server on Windows/Linux. Verifies the server responds correctly on startup; exits with error if port 8002 is occupied by a stale process. |
+| `startup.ts` | Startup orchestration — `validateDimensions`, `runStartupReindex`, `populateBodyHashRegistry`. Extracted from `index.ts` for testability. Handles UUID assignment for new files, metadata sync for renames, force re-embed, and body-hash registry population. |
 | `watcher.ts` | `startVaultWatcher()` — Bun `fs.watch` recursive with 200ms debounce. Handles `.md` upsert/delete with UUID assignment, collision detection, body hash dedup. Media file support via media cache. Image captioning when `config.captioning` is set. |
+| `search/keyword.ts` | In-process keyword search with two-pass filtering (cheap title/abstract pass + full body read). Tokenizes with stop-word removal, scores with title weighting (2×), anchors excerpt at first body match. |
 | `dilucidate/cluster.ts` | Core clustering algorithm. ≤300 engrams: exact O(n²) pairwise cosine similarity. >300 engrams: O(n·k) neighbor search. Connected-components BFS + missing wikilink detection |
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram to configurable folder, upserts to ChromaDB. Optional `folder` parameter for vault-relative path. |
 | `tools/search-memory.ts` | Search with `mode`: `"semantic"`, `"keyword"`, `"hybrid"`. LRU cache skips re-embedding repeated queries. `caller` param for reranker integration. Surfaces `isChunk`/`parentEngramId` for chunk results. |
@@ -92,7 +96,7 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a 
 
 ### Complexity hotspots
 
-1. **Startup re-indexing** (`index.ts`:106-203): Multi-phase orchestration handling UUID assignment, missing files, and path/title drift. Multiple code paths interacting with vault, ChromaDB, vaultIndex.
+1. **Startup re-indexing** (`startup.ts` — `runStartupReindex`): Multi-phase orchestration handling UUID assignment, missing files, and path/title drift. Multiple code paths interacting with vault, ChromaDB, vaultIndex.
 2. **File watcher upsert** (`watcher.ts` handleMdUpsert): Implicit state machine with branches for UUID assignment, rename detection, collision, and dedup.
 3. **PDF processing** (`media-processor.ts` processPdf): Two embeddings per page — text (pdfjs extraction, always present) and image (mutool draw at 200 DPI, may be null if embedding server doesn't support multimodal). ChromaDB gets two entries per page: `{hash}-page-{N}-txt` (text embedding) and `{hash}-page-{N}` (image embedding, only if `imageEmbedding` succeeded). Both entries store `extractedText` in `content`/`abstract` for keyword search and readable excerpts.
 4. **Clustering wikilink detection** (`dilucidate/cluster.ts`): Combines BFS, similarity thresholding, and vault file reads. Vault read for every pair in cluster is performance-sensitive.
@@ -115,6 +119,8 @@ Each engram carries an **abstract** in frontmatter — a required paragraph summ
 ### Config resolution
 
 `loadConfig()` searches in order: `config.local.json` (cwd), `config.json` (cwd), then parent directory. The server runs from `server/` so both `server/config.json` and root `config.json` work. Copy `config.example.json` to `config.json` to start. All defaults are defined in the Zod schema in `config.ts`.
+
+The Zod schema also defines `server` (port, HTTPS certs), `chroma` (host, collection name), `wikilinks` (similarity threshold, max links), `watcher` (enabled toggle, LibreOffice path), and `embedding` batch controls (`batchSize`, `batchMaxChars`, `overheadBuffer`).
 
 ### Skills
 
@@ -153,10 +159,7 @@ Tests use Bun's built-in test runner (`bun:test`) — no additional framework. R
 **Strengths**: LRU cache, clustering algorithm, search-memory, media processing, keyword search
 
 **Gaps**:
-- Vault index: Rename handling and collision detection
-- Wikilinks: Backlink generation
-- File watcher: Markdown upsert logic (complex state machine)
-- Startup: End-to-end dimension validation flow
 - Error recovery: Network errors, file corruption
 - Concurrent access: File watcher + tool call race conditions
 - Media processing: PDF/Office conversion edge cases
+- `tools/list-engrams.ts` and `tools/context.ts`: Basic read/list handlers without dedicated tests

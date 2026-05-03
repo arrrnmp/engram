@@ -75,9 +75,16 @@ Optional re-embed modes:
 bun run re-embed                  # re-embed markdown + media
 bun scripts/start.ts --re-embed-md
 bun scripts/start.ts --re-embed-pdf
+bun scripts/migrate.ts            # re-embed all engrams after model/dimension changes
 ```
 
-Run the test suite with:
+Dev server with hot reload:
+
+```bash
+cd server && bun run dev
+```
+
+Run the test suite:
 
 ```bash
 cd server && bun test
@@ -85,14 +92,17 @@ cd server && bun test
 
 ### Manual configuration
 
-Edit `config.json` for custom settings:
+Edit `config.json` for custom settings. See `server/src/config.ts` for the full Zod schema:
 
 ```json
 {
   "vault": { "path": "~/Documents/my-engram-vault" },
+  "chroma": { "host": "http://localhost:8000", "collection": "engrams" },
+  "server": { "port": 7384 },
   "embedding": {
     "vllm": { "host": "http://localhost:8001" },
-    "quant": "q4_k_m"
+    "quant": "q4_k_m",
+    "queryCacheSize": 64
   }
 }
 ```
@@ -120,7 +130,7 @@ To use local captioning (auto-detected by platform):
 - **macOS (Apple Silicon)**: `bun run start` launches an MLX-LM server with the configured model (default: `mlx-community/Qwen3.5-4B-MLX-4bit`).
 - **Windows / Linux**: `bun run start` launches `llama-server` with the configured GGUF (default: `unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-UD-Q4_K_XL.gguf`).
 
-> **Note**: The default models (`Qwen3.5-4B`) are vision-capable foundation models. If caption server verification fails on startup, Engram exits with an error so you know immediately — no stale or silent failures.
+> **Note**: The default models (`Qwen3.5-4B`) are vision-capable foundation models. When using `bun run start`, the startup script verifies the caption server and exits if verification fails. If you start the server directly, it will warn and fall back to filenames instead.
 
 ### 4. Connect your agent
 
@@ -146,6 +156,8 @@ For other MCP clients, add manually:
 }
 ```
 
+Health endpoint: `http://localhost:7384/health` returns `{ status: "ok", embedder, sessions }`.
+
 ## Skills
 
 | Skill | Invoke | What it does |
@@ -168,7 +180,9 @@ For other MCP clients, add manually:
 | `embeddings/qwen-vl.ts` | Multimodal embedding provider via vLLM |
 | `embeddings/cache.ts` | LRU cache for query embeddings |
 | `embeddings/index.ts` | Provider factory with hardware-aware selection |
+| `embeddings/batch.ts` | Batched text embedding with memory-safe chunking and sequential fallback |
 | `hardware/detect.ts` | Cross-platform hardware detection (Apple/NVIDIA/CPU) |
+| `startup.ts` | Startup orchestration: dimension validation, re-index, metadata sync, body-hash population |
 | `hardware/memory.ts` | Quantization variant selection by available memory |
 | `media-processor.ts` | PDF, Office, image, video processing pipeline |
 | `media-cache.ts` | Media processing cache to avoid redundant work |
@@ -222,6 +236,9 @@ bun scripts/migrate.ts
 ├── IMPORTANT.md                                   ← persistent user profile
 ├── .dilucidate-meta.json                          ← /dilucidate run history
 ├── .engram-body-hashes.json                       ← dedup registry
+├── .engram-collection-meta.json                   ← embedding model/dimension metadata
+├── .engram-media-cache.json                       ← media processing cache
+├── .engram-chunks/                                ← chunk indices
 ├── 2026-04-29/
 │   └── Rust Async Runtime — Design Decisions.md
 ├── 2026-04-28/
@@ -266,4 +283,4 @@ Run the test suite with `cd server && bun test`.
 
 **Well-covered**: LRU cache, clustering, search, media processing, keyword search
 
-**Coverage gaps**: Vault index rename handling, wikilink backlinks, file watcher upsert logic, concurrent access scenarios
+**Coverage gaps**: Concurrent access scenarios (file watcher + tool call race conditions), `tools/list-engrams.ts` and `tools/context.ts` basic handlers

@@ -94,4 +94,8 @@ export class BodyHashRegistry {
       }
     }
   }
+
+  size(): number {
+    return this.map.size;
+  }
 }

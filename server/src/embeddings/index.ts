@@ -7,7 +7,7 @@ import { logger } from "../logger.js";
 
 export type { EmbeddingProvider };
 
-async function isVllmHealthy(host: string, timeout: number): Promise<boolean> {
+export async function isVllmHealthy(host: string, timeout: number): Promise<boolean> {
   try {
     const res = await fetch(`${host}/health`, { signal: AbortSignal.timeout(timeout) });
     return res.ok || res.status < 500;
@@ -17,7 +17,8 @@ async function isVllmHealthy(host: string, timeout: number): Promise<boolean> {
 }
 
 export async function createEmbeddingProvider(
-  config: Config
+  config: Config,
+  hardwareInfo?: import("../hardware/detect.js").HardwareInfo
 ): Promise<EmbeddingProvider> {
   const { embedding } = config;
   const vllmHost = embedding.vllm.host;
@@ -31,7 +32,7 @@ export async function createEmbeddingProvider(
     );
   }
 
-  const hw = detectHardware();
+  const hw = hardwareInfo ?? detectHardware();
   logger.info(`[embeddings] Hardware: ${hw.platform}${hw.gpuName ? ` (${hw.gpuName})` : ""}, ${hw.availableMemoryGB.toFixed(1)} GB available`);
   logger.info(`[embeddings] server at ${vllmHost}`);
 
