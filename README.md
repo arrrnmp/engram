@@ -1,6 +1,6 @@
 # Engram
 
-Multimodal AI memory database. Memories are saved as markdown files in an Obsidian vault (at arbitrary folder depths), embedded via Qwen3-VL-Embedding-8B into ChromaDB, and retrieved through an MCP server that works with any MCP-compatible agent. A file watcher keeps ChromaDB in sync with Obsidian edits in real time.
+Multimodal AI memory database. Memories are saved as markdown files in an Obsidian vault (at arbitrary folder depths), embedded via Qwen3-VL-Embedding-2B into ChromaDB, and retrieved through an MCP server that works with any MCP-compatible agent. A file watcher keeps ChromaDB in sync with Obsidian edits in real time.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Obsidian Vault (any/folder/path/title.md)
        ↕ embed / search
     ChromaDB (port 8000)
        ↑
-  vLLM (port 8001) — Qwen3-VL-Embedding-2B
+  Embedding server (vLLM/MLX, port 8001) — Qwen3-VL-Embedding-2B
 ```
 
 Each Engram carries a stable UUID in its frontmatter. At startup the server scans the vault recursively to build an in-memory index (UUID → relative path), validates embedding dimensions, and re-embeds any files missing from ChromaDB. The file watcher then monitors for changes — new or modified `.md` files are automatically indexed. Files can be freely renamed or moved in Obsidian without breaking the index.
@@ -48,15 +48,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. Start vLLM
-
-```bash
-vllm serve Qwen/Qwen3-VL-Embedding-8B --runner pooling --port 8001
-```
-
-vLLM must be running before the Engram server starts. See the hardware table below for quantization options.
-
-### 3. Run the onboarding script
+### 2. Run the onboarding script
 
 ```bash
 bun scripts/setup.ts
@@ -66,15 +58,23 @@ The script checks every prerequisite, detects your hardware, recommends the righ
 
 | What it checks | What it does if missing |
 |---|---|
-| vLLM | Shows start command with recommended quantization |
+| Embedding backend (MLX/vLLM) | Verifies required runtime and shows how to proceed for your platform |
 | uv + chromadb | Offers to run `uv sync` (creates `.venv`, installs from `pyproject.toml`) |
 | Server deps | Runs `bun install` automatically |
 | `config.json` | Creates from defaults, asks for vault path |
 
-### 4. Start
+### 3. Start
 
 ```bash
 bun run start        # starts ChromaDB, embedding server, Ollama (if configured), and Engram
+```
+
+Optional re-embed modes:
+
+```bash
+bun run re-embed                  # re-embed markdown + media
+bun scripts/start.ts --re-embed-md
+bun scripts/start.ts --re-embed-pdf
 ```
 
 Run the test suite with:
@@ -92,7 +92,7 @@ Edit `config.json` for custom settings:
   "vault": { "path": "~/Documents/my-engram-vault" },
   "embedding": {
     "vllm": { "host": "http://localhost:8001" },
-    "quant": "q4"
+    "quant": "q4_k_m"
   }
 }
 ```
@@ -120,7 +120,7 @@ To use Ollama captioning with the Qwen3-VL model:
 
 `bun run start` will auto-download `Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf`, create a local Ollama source model from it, and alias that model to `engram-caption`. If your current Ollama build cannot load that GGUF, it automatically falls back to `qwen2.5vl:3b`.
 
-### 5. Connect your agent
+### 4. Connect your agent
 
 The setup script auto-registers Engram's MCP endpoint and installs skills for all detected agent tools. Supported:
 
@@ -154,10 +154,6 @@ For other MCP clients, add manually:
 | `dilucidate` | `/dilucidate` | Weekly memory graph analysis: clusters, contradictions, wikilinks, summaries, tags, decay — two-phase with approval gate |
 | `surface-memories` | *(auto-triggered)* | Silently searches for relevant context when a conversation touches a known topic |
 
-## MCP Tools
-
-The server exposes these tools directly (used by skills internally):
-
 ## Server Modules
 
 | Module | Purpose |
@@ -181,13 +177,16 @@ The server exposes these tools directly (used by skills internally):
 | `logger.ts` | Winston logging to console + files |
 
 ## MCP Tools
+| Tool | Purpose |
+|---|---|
 | `save_memory` | Write an Engram, embed it, generate wikilinks. Requires `title`, `abstract`, `content`. Optional `folder` for vault-relative placement, `type` for categorization |
 | `search_memory` | Search by `mode`: `"semantic"` (default), `"keyword"` (exact terms), `"hybrid"` (0.7+0.3 merge). Filterable by date range, type. Returns `abstract` on each result |
-| `list_engrams` | List Engrams, filterable by date range. Supports pagination. Returns UUID, title, abstract, date, relativePath, type — no file body reads |
+| `list_engrams` | List Engrams, filterable by date range. Supports pagination (`limit`, `offset`) and returns `total` for full-count workflows |
 | `read_engram` | Read a single Engram by UUID. Returns structured content: title, date, type, tags, body, wikilinks |
 | `read_engrams` | Batch read up to 20 Engrams in one call. 80K char response guard. |
 | `update_engram` | Update in-place: `setAbstract` (synced to ChromaDB), `setContent` (replaces body, re-embeds), `editContent` (targeted string replacement, re-embeds), `addTags`, `addWikilinks` |
 | `delete_engram` | Permanently delete — removes vault file, ChromaDB entry, index entry, body hash. Cannot be undone |
+| `chunk_engram` | Chunk a long Engram into individually indexed segments (`create` / `re-embed` modes) |
 | `cluster_memories` | Compute semantic clusters — returns groups, avg similarity, missing wikilinks. Used by `/dilucidate` |
 | `get_vault_structure` | Get the current vault directory tree. Call before `save_memory` to choose an appropriate folder |
 | `get_important_context` | Read IMPORTANT.md |
@@ -199,14 +198,15 @@ The server exposes these tools directly (used by skills internally):
 
 Qwen3-VL-Embedding-2B via vLLM — single provider for text, images, video, and PDFs. 2048-dimensional output.
 
-| Quant | VRAM | vLLM flag | Notes |
+| Quant | Approx memory | Backend args | Notes |
 |---|---|---|---|
-| Q8 | ~11 GB | `--quantization bitsandbytes` | Highest quality |
-| Q6 | ~9 GB | GPTQ 6-bit | Good balance |
-| Q4 | ~7 GB | `--quantization awq` | Recommended default |
-| NVFP4 | ~7 GB | `--quantization nvfp4` | Blackwell only |
+| `q8_0` | ~3.5 GB | `--load-format gguf --gguf-file ...Q8_0.gguf` | Highest quality GGUF |
+| `q6_k` | ~3.0 GB | `--load-format gguf --gguf-file ...Q6_K.gguf` | Balanced quality/cost |
+| `q5_k_m` | ~2.5 GB | `--load-format gguf --gguf-file ...Q5_K_M.gguf` | Mid-tier fallback |
+| `q4_k_m` | ~2.0 GB | `--load-format gguf --gguf-file ...Q4_K_M.gguf` | Lowest-memory GGUF fallback |
+| `nvfp4` | GPU-dependent | `--quantization nvfp4` | Blackwell-specific checkpoint |
 
-The server auto-selects the highest-quality quantization that fits your GPU memory (with 25% overhead buffer). Override with `"quant": "q4"` in config.
+The server auto-selects the highest-quality quantization that fits your GPU memory (with 25% overhead buffer). Override with `"quant": "q4_k_m"` (or `q5_k_m` / `q6_k` / `q8_0`) in config.
 
 If the embedding model changes after data is stored, run the migration script:
 ```bash

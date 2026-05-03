@@ -24,7 +24,7 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
 
 2. **Read the current IMPORTANT.md** via `get_important_context`. Keep it in mind as a baseline.
 
-3. **Identify high-value engrams** from the list. Use each engram's `abstract` (returned by `list_engrams`) as a first-pass filter — read the abstract carefully and decide whether the full body is needed. Call `read_engram` for any engram where:
+3. **Identify high-value engrams** from the list. Use each engram's `abstract` (returned by `list_engrams`) as a first-pass filter — read the abstract carefully and decide whether the full body is needed. Use `read_engrams` in batches (up to 20 IDs) for efficiency; use `read_engram` for follow-up on specific IDs when needed. Read full content for any engram where:
    - The abstract is absent (older engrams may not have one)
    - The abstract suggests content that goes beyond what IMPORTANT.md already captures
    - The abstract is ambiguous about details that matter for the profile
@@ -42,7 +42,7 @@ IMPORTANT.md is an evergreen profile of the user. It is loaded at the start of e
 
    If a specific named project, tool, technology, or person surfaced during the abstract scan in step 3, add a targeted query for it using `mode: "hybrid"`. The keyword pass gives exact-match lift for proper nouns that the vector might rank below thematically related but less relevant results.
 
-   Call `read_engram` for any result not already read in step 3.
+   Read any result not already covered in step 3 (prefer batched `read_engrams` when multiple IDs are pending).
 
 5. **Synthesize** the findings into a new IMPORTANT.md. Always write in **English**, regardless of the language of the source engrams. Write in **third person** — this file is read by a future AI model, not by the user. Use whatever name or pronoun the user goes by (e.g. "Alex prefers…", "They are working on…"), never "You prefer…".
 

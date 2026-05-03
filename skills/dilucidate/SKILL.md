@@ -19,7 +19,7 @@ Always write all output — engram content, summaries, tags, reports — in **En
 ### Step 1 — Early exit check
 
 Call `get_dilucidate_meta`. If it returns a non-null `meta`:
-- Get the current engram count via `list_engrams`
+- Call `list_engrams` and use its `total` field as the current engram count
 - If `currentCount - meta.engramCountAtLastRun < 5`, tell the user:
   ```
   Only N new memories since last dilucidation (YYYY-MM-DD).
@@ -43,7 +43,7 @@ Note the clusters and `missingLinks` within each cluster.
 ### Step 3 — Contradiction detection
 
 For each cluster with 3+ engrams:
-1. Call `read_engram` for each engram in the cluster
+1. Read engrams in batches with `read_engrams` (up to 20 IDs per call). Use `read_engram` only when a batch result returns an error for a specific ID or when you need a non-truncated body.
 2. Analyze whether any two engrams contain opposing conclusions, decisions, or recommendations
 3. Two engrams contradict if they recommend different approaches to the same problem, or if a later one reverses an earlier decision without acknowledging it
 4. Record each contradiction as `{ engramA: UUID, engramB: UUID, summary: "one-line description" }`
@@ -53,14 +53,15 @@ Note: a summary engram cannot contradict its own source engrams — skip those.
 ### Step 4 — Synthesis candidates
 
 Clusters with 5+ engrams are candidates for a synthesis engram. For each:
-1. Read all engrams in the cluster
+1. Read all engrams in the cluster (prefer `read_engrams` batch calls; use `read_engram` only for follow-up detail)
 2. Identify what emerges from reading them *together* — cross-cutting patterns, the overall picture, how the pieces relate to each other — that is not visible from any single engram alone. Do not compress or replace the source engrams. The synthesis adds a new layer of understanding on top of them; all detail remains in the originals.
 
 ### Step 5 — Tag audit
 
-The `list_engrams` result from Step 2 is already available. For each engram where `tags` is absent or `[]`:
-1. Check the `abstract` field — if it is present and detailed enough, propose 2–4 relevant tags directly from the abstract (e.g. `"psychology"`, `"career"`, `"relationships"`) without calling `read_engram`
-2. Only call `read_engram` if the abstract is absent or too sparse to determine good tags
+`list_engrams` does not include tag arrays. Build a complete read map for all relevant IDs using `read_engrams` in batches (up to 20 IDs per call), then:
+1. Identify engrams where `tags` is missing or `[]` from the read results
+2. For each, check `abstract` from `list_engrams`; if it is detailed enough, propose 2–4 tags directly from it
+3. If abstract context is too sparse, use the body from the read result. If the body was truncated in batch output, call `read_engram` for that ID
 
 ### Step 6 — Decay scoring
 
@@ -71,7 +72,7 @@ daysSinceDate = days between engram date and today
 recencyScore = 1 / (1 + daysSinceDate / 30)
 ```
 
-Read the engram to count wikilinks in its `## Related Memories` section. Let `maxLinks` be the highest link count across all engrams.
+Use the read map from Step 5 to count wikilinks per engram. Let `maxLinks` be the highest link count across all engrams.
 
 ```
 connectivityScore = linkCount / max(maxLinks, 1)

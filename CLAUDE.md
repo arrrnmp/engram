@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Engram is a multimodal AI memory database. Memories are saved as markdown files in an Obsidian vault (at arbitrary folder depths), embedded via Qwen3-VL-Embedding-8B into ChromaDB, and retrieved through an MCP server. The vault is fully readable in Obsidian including graph view via `[[wikilinks]]`. The file watcher enables bidirectional sync — edits in Obsidian are automatically re-indexed.
+Engram is a multimodal AI memory database. Memories are saved as markdown files in an Obsidian vault (at arbitrary folder depths), embedded via Qwen3-VL-Embedding-2B into ChromaDB, and retrieved through an MCP server. The vault is fully readable in Obsidian including graph view via `[[wikilinks]]`. The file watcher enables bidirectional sync — edits in Obsidian are automatically re-indexed.
 
 ## Commands
 
@@ -29,14 +29,14 @@ Obsidian Vault (any/folder/path/title.md)
       ↕ embed / search
     ChromaDB (port 8000)
       ↑
-  vLLM (port 8001) — Qwen3-VL-Embedding-2B (text, images, video, PDFs)
+  vLLM / MLX server (port 8001) — Qwen3-VL-Embedding-2B (text, images, video, PDFs)
       ↑ (optional, for captioning)
-  Ollama (port 11434) — Qwen3.5-4B (image captioning; macOS: qwen3.5:4b-nvfp4 MLX, other: Unsloth GGUF via ollama create)
+  Ollama (port 11434) — `engram-caption` alias (source: downloaded Qwen3-VL 4B GGUF, fallback: qwen2.5vl:3b)
 ```
 
 ### Server entry point
 
-`server/src/index.ts` — Bun HTTP server with session-based MCP transport. Each MCP client gets its own `McpServer` + `WebStandardStreamableHTTPServerTransport` pair, keyed by session ID. The expensive singletons (embedder, ChromaDB client, vault, vaultIndex, bodyHashRegistry) are shared across sessions. vLLM must be running before the server starts — it polls the health endpoint and exits with instructions if unreachable.
+`server/src/index.ts` — Bun HTTP server with session-based MCP transport. Each MCP client gets its own `McpServer` + `WebStandardStreamableHTTPServerTransport` pair, keyed by session ID. The expensive singletons (embedder, ChromaDB client, vault, vaultIndex, bodyHashRegistry, mediaCache) are shared across sessions. The server expects a healthy embedding endpoint; `bun run start` bootstraps this automatically.
 
 On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a dimension validation check, loads the body hash registry, and runs a re-index pass: any engram present in the vault but missing from ChromaDB is re-embedded and upserted. After re-index, the file watcher starts monitoring vault changes.
 
@@ -44,7 +44,7 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a 
 
 | Module | Purpose |
 |---|---|
-| `config.ts` | Zod-validated config loading from `config.json` / `config.local.json`. Embedding config is simplified: `vllm.host` + optional `quant` override. Optional `captioning` block for image captioning (Ollama endpoint, model, prompt). |
+| `config.ts` | Zod-validated config loading from `config.json` / `config.local.json`. Embedding config includes `vllm.host`, optional quant override, batch controls, and query cache size. Optional `captioning` block supports provider/host/model/prompt and fallback settings. |
 | `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. All file operations use vault-relative paths. |
 | `vault-index.ts` | `VaultIndex` — recursive scan builds UUID→relativePath map with reverse lookup. UUID collision detection reassigns duplicates via `matter.stringify`. `resolveWithFallback` handles mid-session renames. Skips `.` hidden dirs and `_chunks/` sentinel path. |
 | `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata`, `searchByEmbedding`, `getDimensions`. Metadata includes `relativePath` and optional `parentEngramId` (for chunk entries). |
@@ -52,14 +52,17 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a 
 | `embeddings/index.ts` | Provider factory — `createEmbeddingProvider()` connects to vLLM with health check and hardware-aware quantization selection |
 | `embeddings/qwen-vl.ts` | `QwenVLProvider` — multimodal embedding via vLLM `/v1/embeddings`. Supports text, images, video, PDFs. 2048-dim output. |
 | `embeddings/cache.ts` | `LRUEmbeddingCache` — in-process LRU cache for query embeddings. Size configurable via `embedding.queryCacheSize` |
+| `embeddings/batch.ts` | `batchEmbedTexts()` — shared batched text embedding helper used by startup re-indexing, watcher, and media processing |
 | `embeddings/types.ts` | `EmbeddingProvider` interface with `embed(string | MultimodalInput)`, `capabilities()`, `expectedDimensions()` |
 | `hardware/detect.ts` | Detects Apple Silicon, NVIDIA (Blackwell vs older), or CPU |
-| `hardware/memory.ts` | Steps through Qwen3-VL-Embedding-2B quant variants (Q8→Q6→Q4→NVFP4) to fit available memory |
+| `hardware/memory.ts` | GGUF memory planner and selector (`q8_0` → `q6_k` → `q5_k_m` → `q4_k_m`) plus derived embedding batch limits |
 | `body-hash.ts` | `BodyHashRegistry` — SHA256 body hash dedup. Stored in `.engram-body-hashes.json` at vault root. |
 | `media-processor.ts` | Multimodal file processing (PDF, Office, images, video). PDF: mutool screenshot per page (200 DPI) + pdfjs text extraction; each page produces two embeddings — image (visual) and text (semantic). `imageEmbedding` may be null if embedding server doesn't support multimodal input. Office: LibreOffice → PDF → same pipeline. `PdfPageResult` has `imageEmbedding` (nullable), `textEmbedding`, and `extractedText`. |
 | `media-cache.ts` | `MediaCache` — in-process cache for media processing to avoid redundant work. Persists to `.engram-media-cache.json`. |
-| `captioning.ts` | `captionImage()` — calls Ollama `/chat/completions` with base64 image and prompt. Returns caption or `null` on failure. Optional; only active when `captioning` config block is set. |
-| `scripts/ensure-ollama.ts` | Platform-aware Ollama provisioning. macOS: `ollama pull qwen3.5:4b-nvfp4` + `ollama cp` to alias as config model name. Other: download Unsloth GGUF from HuggingFace + `ollama create`. Checks if model already exists before pulling/creating. |
+| `captioning.ts` | `captionImage()` — caption generation with provider auto-detection (`ollama` or OpenAI-compatible `/v1/chat/completions`) and optional fallback provider/model/host. Returns caption or `null` on failure. |
+| `scripts/ensure-chroma.ts` | Ensures ChromaDB is reachable on port 8000; starts detached `uv run chroma run` when absent. |
+| `scripts/ensure-embed-server.ts` | Ensures embedding server is reachable on port 8001; launches MLX server on Apple Silicon or vLLM with hardware-aware model args elsewhere. |
+| `scripts/ensure-ollama.ts` | Ensures captioning backend: starts Ollama if needed, downloads Qwen3-VL 4B GGUF, creates source model + `engram-caption` alias, validates vision output, and falls back to `qwen2.5vl:3b` when required. |
 | `watcher.ts` | `startVaultWatcher()` — Bun `fs.watch` recursive with 200ms debounce. Handles `.md` upsert/delete with UUID assignment, collision detection, body hash dedup. Media file support via media cache. Image captioning when `config.captioning` is set. |
 | `dilucidate/cluster.ts` | Core clustering algorithm. ≤300 engrams: exact O(n²) pairwise cosine similarity. >300 engrams: O(n·k) neighbor search. Connected-components BFS + missing wikilink detection |
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram to configurable folder, upserts to ChromaDB. Optional `folder` parameter for vault-relative path. |
@@ -125,7 +128,7 @@ All skill output — engram content, IMPORTANT.md, search queries — is enforce
 ### External dependencies
 
 - **ChromaDB**: Python venv managed by `uv` (see `pyproject.toml`). Data stored in `.chroma-data/`.
-- **vLLM**: Serves Qwen3-VL-Embedding-2B (2048-dim, multimodal). Must be started separately before Engram.
+- **Embedding server**: Qwen3-VL-Embedding-2B (2048-dim, multimodal) served via MLX on Apple Silicon or vLLM elsewhere. `bun run start` bootstraps it; direct `server/src/index.ts` runs require it to already be reachable.
 - **Bun**: Runtime for the MCP server. No Node.js dependency.
 
 ## Runtime: Bun, not Node
