@@ -66,7 +66,7 @@ The script checks every prerequisite, detects your hardware, recommends the righ
 ### 3. Start
 
 ```bash
-bun run start        # starts ChromaDB, embedding server, Ollama (if configured), and Engram
+bun run start        # starts ChromaDB, embedding server, caption server (if configured), and Engram
 ```
 
 Optional re-embed modes:
@@ -105,20 +105,22 @@ To tune the query embedding cache (default 64 entries, set to 0 to disable):
 }
 ```
 
-To use Ollama captioning with the Qwen3-VL model:
+To use local captioning (auto-detected by platform):
 
 ```json
 {
   "captioning": {
-    "provider": "ollama",
-    "host": "http://localhost:11434/v1",
-    "model": "engram-caption",
+    "provider": "auto",
+    "host": "http://localhost:8002/v1",
     "prompt": "Describe this image concisely for search and retrieval."
   }
 }
 ```
 
-`bun run start` will auto-download `Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf`, create a local Ollama source model from it, and alias that model to `engram-caption`. If your current Ollama build cannot load that GGUF, it automatically falls back to `qwen2.5vl:3b`.
+- **macOS (Apple Silicon)**: `bun run start` launches an MLX-LM server with the configured model (default: `mlx-community/Qwen3.5-4B-MLX-4bit`).
+- **Windows / Linux**: `bun run start` launches `llama-server` with the configured GGUF (default: `unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-UD-Q4_K_XL.gguf`).
+
+> **Note**: The default models (`Qwen3.5-4B`) are vision-capable foundation models. If caption server verification fails on startup, Engram exits with an error so you know immediately — no stale or silent failures.
 
 ### 4. Connect your agent
 

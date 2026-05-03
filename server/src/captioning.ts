@@ -1,14 +1,70 @@
 import { readFileSync } from "fs";
+import sharp from "sharp";
 import { logger } from "./logger.js";
+
+let captionServerUnreachableLogged = false;
+
+/** Max long-edge dimension for images sent to caption server.
+ *  Qwen3.5-VL's vision encoder memory scales with image area;
+ *  a 5.5K image can spike RAM to 10GB+. 1536px preserves detail
+ *  while keeping memory under ~3GB. */
+const CAPTION_MAX_IMAGE_DIM = 1536;
+
+export async function preprocessImageForCaption(filePath: string, mimeType: string): Promise<Buffer> {
+  if (!mimeType.startsWith("image/")) {
+    return readFileSync(filePath);
+  }
+
+  try {
+    const image = sharp(filePath);
+    const metadata = await image.metadata();
+    if (!metadata.width || !metadata.height) {
+      return readFileSync(filePath);
+    }
+
+    const maxDim = Math.max(metadata.width, metadata.height);
+    if (maxDim <= CAPTION_MAX_IMAGE_DIM) {
+      return readFileSync(filePath);
+    }
+
+    // Resize the longer edge to CAPTION_MAX_IMAGE_DIM, Lanczos3 for best detail retention
+    const resized = await image
+      .resize({
+        width: metadata.width > metadata.height ? CAPTION_MAX_IMAGE_DIM : undefined,
+        height: metadata.height >= metadata.width ? CAPTION_MAX_IMAGE_DIM : undefined,
+        kernel: sharp.kernel.lanczos3,
+        fastShrinkOnLoad: false,
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toBuffer();
+
+    logger.info(
+      `[captioning] Resized image from ${metadata.width}x${metadata.height} ` +
+      `→ max ${CAPTION_MAX_IMAGE_DIM}px (${(resized.length / 1024).toFixed(0)}KB)`
+    );
+    return resized;
+  } catch (err) {
+    logger.debug(
+      `[captioning] Image resize skipped (sharp could not parse), using original: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return readFileSync(filePath);
+  }
+}
 
 export interface CaptioningConfig {
   host: string;
-  model: string;
+  model?: string;
   prompt: string;
-  provider?: "auto" | "ollama" | "openai";
-  fallbackHost?: string;
-  fallbackModel?: string;
-  fallbackProvider?: "ollama" | "openai";
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  presencePenalty?: number;
+  repetitionPenalty?: number;
+  think?: boolean;
+  extraBody?: Record<string, unknown>;
 }
 
 function extractCaptionText(content: unknown, depth = 0): string | null {
@@ -57,20 +113,6 @@ function normalizeOpenAIHost(host: string): string {
   return /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`;
 }
 
-function looksLikeOllamaHost(host: string): boolean {
-  try {
-    const url = new URL(host);
-    return url.port === "11434" || /ollama/i.test(url.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function resolveProvider(host: string, provider: CaptioningConfig["provider"]): "ollama" | "openai" {
-  if (provider === "ollama" || provider === "openai") return provider;
-  return looksLikeOllamaHost(host) ? "ollama" : "openai";
-}
-
 type CaptionAttempt = {
   caption: string | null;
   noVision: boolean;
@@ -78,39 +120,52 @@ type CaptionAttempt = {
   detail?: string;
 };
 
-async function requestOpenAICaption(
+function buildRequestBody(
+  b64: string,
+  mimeType: string,
+  config: CaptioningConfig,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: config.model ?? "",
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${b64}` } },
+        { type: "text", text: config.prompt },
+      ],
+    }],
+    max_tokens: config.maxTokens ?? 256,
+    temperature: config.temperature ?? 0.7,
+    top_p: config.topP ?? 0.8,
+    presence_penalty: config.presencePenalty ?? 1.5,
+    top_k: config.topK ?? 20,
+    min_p: config.minP ?? 0.0,
+    repetition_penalty: config.repetitionPenalty ?? 1.0,
+    think: config.think ?? false,
+  };
+
+  if (config.extraBody && typeof config.extraBody === "object") {
+    for (const [key, value] of Object.entries(config.extraBody)) {
+      body[key] = value;
+    }
+  }
+
+  return body;
+}
+
+async function requestCaption(
   b64: string,
   filePath: string,
   mimeType: string,
-  host: string,
-  model: string,
-  prompt: string,
+  config: CaptioningConfig,
 ): Promise<CaptionAttempt> {
   try {
-    const endpoint = `${normalizeOpenAIHost(host)}/chat/completions`;
+    const endpoint = `${normalizeOpenAIHost(config.host)}/chat/completions`;
+    const body = buildRequestBody(b64, mimeType, config);
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${b64}` } },
-            { type: "text", text: prompt },
-          ],
-        }],
-        max_tokens: 256,
-        temperature: 0.7,
-        top_p: 0.8,
-        presence_penalty: 1.5,
-        extra_body: {
-          think: false,
-          top_k: 20,
-          min_p: 0.0,
-          repetition_penalty: 1.0,
-        },
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -156,75 +211,20 @@ async function requestOpenAICaption(
   }
 }
 
-async function requestOllamaCaption(
-  b64: string,
-  host: string,
-  model: string,
-  prompt: string,
-): Promise<CaptionAttempt> {
-  const base = host.replace(/\/v1\/?$/i, "").replace(/\/+$/, "");
+export async function isCaptionServerReachable(host: string): Promise<boolean> {
   try {
-    const res = await fetch(`${base}/api/generate`, {
+    const url = `${normalizeOpenAIHost(host)}/chat/completions`;
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        prompt,
-        images: [b64],
-        stream: false,
-        options: {
-          temperature: 0.7,
-          top_p: 0.8,
-          top_k: 20,
-          min_p: 0.0,
-          repeat_penalty: 1.0,
-          presence_penalty: 1.5,
-        },
-      }),
+      body: JSON.stringify({ model: "", messages: [] }),
+      signal: AbortSignal.timeout(3000),
     });
-    if (!res.ok) {
-      return { caption: null, noVision: false, reason: "http_error", detail: `${res.status} ${res.statusText}` };
-    }
-    const json = await res.json() as any;
-    const caption = extractCaptionText(json.response ?? json.message?.content ?? json.output ?? json.output_text);
-    if (caption) {
-      if (hasNoVisionSignal(caption)) {
-        return { caption: null, noVision: true, reason: "no_text", detail: "model returned non-vision refusal text" };
-      }
-      return { caption, noVision: false, reason: "ok" };
-    }
-    const noVisionHint = extractCaptionText(json.thinking ?? json.reasoning ?? json.response);
-    const keys = json && typeof json === "object"
-      ? Object.keys(json as Record<string, unknown>).slice(0, 8).join(", ")
-      : typeof json;
-    return {
-      caption: null,
-      noVision: !!(noVisionHint && hasNoVisionSignal(noVisionHint)),
-      reason: "no_text",
-      detail: `keys: ${keys || "none"}`,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { caption: null, noVision: false, reason: "exception", detail: msg };
+    // Any response (even 4xx) means the server is reachable; connection refused throws.
+    return true;
+  } catch {
+    return false;
   }
-}
-
-async function requestCaption(
-  b64: string,
-  filePath: string,
-  mimeType: string,
-  host: string,
-  model: string,
-  prompt: string,
-  provider: "ollama" | "openai",
-): Promise<CaptionAttempt> {
-  if (provider === "ollama") {
-    const ollamaAttempt = await requestOllamaCaption(b64, host, model, prompt);
-    if (ollamaAttempt.caption || ollamaAttempt.reason !== "http_error") return ollamaAttempt;
-    // Host might expose only OpenAI-compatible API; fallback in-process.
-    return requestOpenAICaption(b64, filePath, mimeType, host, model, prompt);
-  }
-  return requestOpenAICaption(b64, filePath, mimeType, host, model, prompt);
 }
 
 export async function captionImage(
@@ -232,53 +232,48 @@ export async function captionImage(
   mimeType: string,
   config: CaptioningConfig,
 ): Promise<string | null> {
-  const data = readFileSync(filePath);
+  if (!captionServerUnreachableLogged) {
+    const reachable = await isCaptionServerReachable(config.host);
+    if (!reachable) {
+      captionServerUnreachableLogged = true;
+      logger.warn(
+        `[captioning] Caption server not reachable at ${config.host}. ` +
+        `Ensure the caption server is running (run \`bun run start\` or start it manually). ` +
+        `Image captions will fall back to filenames.`
+      );
+      return null;
+    }
+  }
+
+  const data = await preprocessImageForCaption(filePath, mimeType);
   const b64 = data.toString("base64");
 
-  const primaryProvider = resolveProvider(config.host, config.provider);
-  const primary = await requestCaption(
-    b64,
-    filePath,
-    mimeType,
-    config.host,
-    config.model,
-    config.prompt,
-    primaryProvider,
-  );
-  if (primary.caption) return primary.caption;
+  const result = await requestCaption(b64, filePath, mimeType, config);
+  if (result.caption) return result.caption;
 
-  const fallbackHost = config.fallbackHost;
-  if (fallbackHost) {
-    const fallbackProvider = config.fallbackProvider ?? resolveProvider(fallbackHost, "auto");
-    const fallbackModel = config.fallbackModel ?? config.model;
-    logger.info(`[captioning] Retrying caption via fallback provider (${fallbackProvider}) for ${filePath}`);
-    const fallback = await requestCaption(
-      b64,
-      filePath,
-      mimeType,
-      fallbackHost,
-      fallbackModel,
-      config.prompt,
-      fallbackProvider,
-    );
-    if (fallback.caption) return fallback.caption;
-    const fallbackDetail = fallback.detail ? ` (${fallback.detail})` : "";
-    logger.warn(`[captioning] Fallback caption request failed for ${filePath}: ${fallback.reason}${fallbackDetail}`);
-  }
-
-  if (primary.noVision) {
-    logger.warn(`[captioning] Model "${config.model}" appears to lack usable vision output at ${config.host}; no caption text for ${filePath}`);
+  if (result.noVision) {
+    logger.warn(`[captioning] Model appears to lack usable vision output at ${config.host}; no caption text for ${filePath}`);
     return null;
   }
 
-  if (primary.reason === "http_error") {
-    logger.warn(`[captioning] Caption request failed for ${filePath}: ${primary.detail ?? "http error"}`);
+  if (result.reason === "http_error") {
+    logger.warn(`[captioning] Caption request failed for ${filePath}: ${result.detail ?? "http error"}`);
     return null;
   }
-  if (primary.reason === "exception") {
-    logger.warn(`[captioning] Caption request threw for ${filePath}: ${primary.detail ?? "unknown error"}`);
+  if (result.reason === "exception") {
+    const isConnectionError = result.detail?.toLowerCase().includes("unable to connect") ?? false;
+    if (isConnectionError && !captionServerUnreachableLogged) {
+      captionServerUnreachableLogged = true;
+      logger.warn(
+        `[captioning] Caption server not reachable at ${config.host}. ` +
+        `Ensure the caption server is running (run \`bun run start\` or start it manually). ` +
+        `Image captions will fall back to filenames.`
+      );
+    } else if (!isConnectionError) {
+      logger.warn(`[captioning] Caption request threw for ${filePath}: ${result.detail ?? "unknown error"}`);
+    }
     return null;
   }
-  logger.warn(`[captioning] Caption response had no usable text for ${filePath}${primary.detail ? ` (${primary.detail})` : ""}`);
+  logger.warn(`[captioning] Caption response had no usable text for ${filePath}${result.detail ? ` (${result.detail})` : ""}`);
   return null;
 }

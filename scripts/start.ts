@@ -12,7 +12,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { ensureChromaRunning } from "./ensure-chroma.js";
 import { ensureEmbedServer } from "./ensure-embed-server.js";
-import { ensureOllama } from "./ensure-ollama.js";
+import { ensureCaptionServer } from "./ensure-caption-server.js";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -49,9 +49,9 @@ const chromaProc = await ensureChromaRunning(ROOT);
 
 const embedProc = await ensureEmbedServer(ROOT);
 
-// ── Ollama (captioning) ─────────────────────────────────────────────────────────
+// ── Captioning server ──────────────────────────────────────────────────────────
 
-const ollamaProc = await ensureOllama(ROOT);
+const captionProc = await ensureCaptionServer(ROOT);
 
 // ── Server deps ───────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ const server = Bun.spawn(["bun", "run", "src/index.ts"], {
 function shutdown() {
   server.kill();
   embedProc?.kill();
-  ollamaProc?.kill();
+  captionProc?.kill();
   chromaProc?.kill();
   process.exit(0);
 }

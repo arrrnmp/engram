@@ -306,6 +306,19 @@ if (config.watcher.enabled) {
   } else {
     config.watcher.libreOfficePath = resolvedLo;
   }
+
+  // Caption server health check (optional but warns if configured yet unreachable)
+  if (config.captioning) {
+    const { isCaptionServerReachable } = await import("./captioning.js");
+    const reachable = await isCaptionServerReachable(config.captioning.host);
+    if (!reachable) {
+      logger.warn(
+        `[engram] Caption server not reachable at ${config.captioning.host}. ` +
+        `Image captions will fall back to filenames. ` +
+        `Run \`bun run start\` to auto-start the caption server, or start it manually.`
+      );
+    }
+  }
 }
 
 // ── Startup media scan ────────────────────────────────────────────────────────

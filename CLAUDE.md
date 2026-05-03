@@ -11,7 +11,7 @@ Engram is a multimodal AI memory database. Memories are saved as markdown files 
 ```bash
 bun scripts/setup.ts      # Interactive onboarding — checks prerequisites, detects hardware, sets up config
 bun scripts/migrate.ts    # Re-embed all engrams after model/dimension changes
-bun run start              # Starts ChromaDB + embedding server + Ollama (if configured) + Engram server
+bun run start              # Starts ChromaDB + embedding server + caption server (if configured) + Engram server
 bun run re-embed           # Same, but forces re-embedding of ALL vault files (markdown + media)
 bun scripts/start.ts --re-embed  # Direct invocation with re-embed flag
 cd server && bun run dev   # Dev server with --watch
@@ -31,7 +31,7 @@ Obsidian Vault (any/folder/path/title.md)
       ↑
   vLLM / MLX server (port 8001) — Qwen3-VL-Embedding-2B (text, images, video, PDFs)
       ↑ (optional, for captioning)
-  Ollama (port 11434) — `engram-caption` alias (source: downloaded Qwen3-VL 4B GGUF, fallback: qwen2.5vl:3b)
+  Caption server (port 8002) — MLX-LM (macOS) or llama.cpp (Windows/Linux) with vision model
 ```
 
 ### Server entry point
@@ -44,7 +44,7 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a 
 
 | Module | Purpose |
 |---|---|
-| `config.ts` | Zod-validated config loading from `config.json` / `config.local.json`. Embedding config includes `vllm.host`, optional quant override, batch controls, and query cache size. Optional `captioning` block supports provider/host/model/prompt and fallback settings. |
+| `config.ts` | Zod-validated config loading from `config.json` / `config.local.json`. Embedding config includes `vllm.host`, optional quant override, batch controls, and query cache size. Optional `captioning` block supports provider/host/model/prompt, generation params (temperature, topP, topK, minP, presencePenalty, repetitionPenalty, think, extraBody), and fallback settings. |
 | `vault.ts` | Reads/writes markdown files (`Vault` class, `formatEngram`, `parseEngram`, `updateEngramWikilinks`, `toSlug`). Uses `gray-matter` for YAML frontmatter parsing — no raw regex. `formatEngram` accepts optional `tags` parameter. All file operations use vault-relative paths. |
 | `vault-index.ts` | `VaultIndex` — recursive scan builds UUID→relativePath map with reverse lookup. UUID collision detection reassigns duplicates via `matter.stringify`. `resolveWithFallback` handles mid-session renames. Skips `.` hidden dirs and `_chunks/` sentinel path. |
 | `chroma.ts` | `EngramChroma` class — upsert, search, list, delete, `getAllIds`, `getAllWithEmbeddings`, `patchMetadata`, `searchByEmbedding`, `getDimensions`. Metadata includes `relativePath` and optional `parentEngramId` (for chunk entries). |
@@ -59,10 +59,10 @@ On startup, after ChromaDB is ready, the server builds the `VaultIndex`, runs a 
 | `body-hash.ts` | `BodyHashRegistry` — SHA256 body hash dedup. Stored in `.engram-body-hashes.json` at vault root. |
 | `media-processor.ts` | Multimodal file processing (PDF, Office, images, video). PDF: mutool screenshot per page (200 DPI) + pdfjs text extraction; each page produces two embeddings — image (visual) and text (semantic). `imageEmbedding` may be null if embedding server doesn't support multimodal input. Office: LibreOffice → PDF → same pipeline. `PdfPageResult` has `imageEmbedding` (nullable), `textEmbedding`, and `extractedText`. |
 | `media-cache.ts` | `MediaCache` — in-process cache for media processing to avoid redundant work. Persists to `.engram-media-cache.json`. |
-| `captioning.ts` | `captionImage()` — caption generation with provider auto-detection (`ollama` or OpenAI-compatible `/v1/chat/completions`) and optional fallback provider/model/host. Returns caption or `null` on failure. |
+| `captioning.ts` | `captionImage()` — caption generation via OpenAI-compatible `/v1/chat/completions` to the local caption server. Configurable generation params (temperature, topP, topK, etc.). Returns caption or `null` on failure. |
 | `scripts/ensure-chroma.ts` | Ensures ChromaDB is reachable on port 8000; starts detached `uv run chroma run` when absent. |
 | `scripts/ensure-embed-server.ts` | Ensures embedding server is reachable on port 8001; launches MLX server on Apple Silicon or vLLM with hardware-aware model args elsewhere. |
-| `scripts/ensure-ollama.ts` | Ensures captioning backend: starts Ollama if needed, downloads Qwen3-VL 4B GGUF, creates source model + `engram-caption` alias, validates vision output, and falls back to `qwen2.5vl:3b` when required. |
+| `scripts/ensure-caption-server.ts` | Ensures captioning backend: launches MLX-LM server on macOS or llama.cpp server on Windows/Linux. Verifies the server responds correctly on startup; exits with error if port 8002 is occupied by a stale process. |
 | `watcher.ts` | `startVaultWatcher()` — Bun `fs.watch` recursive with 200ms debounce. Handles `.md` upsert/delete with UUID assignment, collision detection, body hash dedup. Media file support via media cache. Image captioning when `config.captioning` is set. |
 | `dilucidate/cluster.ts` | Core clustering algorithm. ≤300 engrams: exact O(n²) pairwise cosine similarity. >300 engrams: O(n·k) neighbor search. Connected-components BFS + missing wikilink detection |
 | `tools/save-memory.ts` | Generates UUID, embeds content, writes engram to configurable folder, upserts to ChromaDB. Optional `folder` parameter for vault-relative path. |
@@ -129,6 +129,7 @@ All skill output — engram content, IMPORTANT.md, search queries — is enforce
 
 - **ChromaDB**: Python venv managed by `uv` (see `pyproject.toml`). Data stored in `.chroma-data/`.
 - **Embedding server**: Qwen3-VL-Embedding-2B (2048-dim, multimodal) served via MLX on Apple Silicon or vLLM elsewhere. `bun run start` bootstraps it; direct `server/src/index.ts` runs require it to already be reachable.
+- **Caption server**: MLX-LM (`python -m mlx_lm.server`) on macOS or `llama-server` on Windows/Linux. Serves vision models for image captioning via OpenAI-compatible API on port 8002. Optional — when absent, image filenames are used as fallback content.
 - **Bun**: Runtime for the MCP server. No Node.js dependency.
 
 ## Runtime: Bun, not Node

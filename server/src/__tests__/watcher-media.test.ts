@@ -166,7 +166,7 @@ describe("upsertMediaFile — image", () => {
 
       const captionConfig: Config = {
         ...config,
-        captioning: { provider: "openai", host: "http://localhost:11434/v1", model: "test-model", prompt: "Describe this image." },
+        captioning: { host: "http://localhost:8002/v1", model: "test-model", prompt: "Describe this image." },
       };
 
       const cache = new MediaCache(dir);
@@ -194,7 +194,7 @@ describe("upsertMediaFile — image", () => {
     try {
       const captionConfig: Config = {
         ...config,
-        captioning: { provider: "openai", host: "http://localhost:11434/v1", model: "test-model", prompt: "Describe this image." },
+        captioning: { host: "http://localhost:8002/v1", model: "test-model", prompt: "Describe this image." },
       };
       const cache = new MediaCache(dir);
 
@@ -230,7 +230,7 @@ describe("upsertMediaFile — image", () => {
 
       const captionConfig: Config = {
         ...config,
-        captioning: { provider: "openai", host: "http://localhost:11434/v1", model: "test-model", prompt: "Describe this image." },
+        captioning: { host: "http://localhost:8002/v1", model: "test-model", prompt: "Describe this image." },
       };
 
       const cache = new MediaCache(dir);
@@ -254,7 +254,7 @@ describe("upsertMediaFile — image", () => {
     try {
       const captionConfig: Config = {
         ...config,
-        captioning: { provider: "openai", host: "http://localhost:11434/v1", model: "test-model", prompt: "Describe this image." },
+        captioning: { host: "http://localhost:8002/v1", model: "test-model", prompt: "Describe this image." },
       };
 
       const cache = new MediaCache(dir);

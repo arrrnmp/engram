@@ -737,56 +737,72 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── 5. Image captioning (Ollama) ─────────────────────────────────────────────
+  // ── 5. Image captioning ──────────────────────────────────────────────────────
   section("Image captioning (optional)");
 
   const captioningEnabled = Boolean((cfg2 as any)?.captioning?.host);
-  const captionHost = (cfg2 as any)?.captioning?.host ?? "http://localhost:11434/v1";
-  const captionProvider = (cfg2 as any)?.captioning?.provider ?? "auto";
-  const captionLooksOllama = (() => {
-    try {
-      const url = new URL(captionHost);
-      return url.port === "11434" || /ollama/i.test(url.hostname);
-    } catch {
-      return false;
-    }
-  })();
-  const useOllama = captionProvider === "ollama" || (captionProvider === "auto" && captionLooksOllama);
+  const captionHost = (cfg2 as any)?.captioning?.host ?? "http://localhost:8002/v1";
+  const captionProvider: string = (cfg2 as any)?.captioning?.provider ?? "auto";
+  const IS_MAC_CAPTION = IS_MAC && arch() === "arm64";
+  const resolvedProvider = captionProvider === "auto"
+    ? (IS_MAC_CAPTION ? "mlx" : "llama")
+    : captionProvider;
 
   if (captioningEnabled) {
-    if (useOllama) {
-      try {
-        const res = await fetch(captionHost.replace(/\/v1$/, ""), { signal: AbortSignal.timeout(3000) });
-        if (res.ok) {
-          row(ok, `Ollama running at ${captionHost.replace(/\/v1$/, "")}`);
+    if (resolvedProvider === "mlx") {
+      const mlxVlmInVenv = (() => {
+        const r = spawnSync("uv", ["run", "--frozen", "python", "-c", "import mlx_vlm"], {
+          cwd: ROOT,
+          stdio: "ignore",
+        });
+        return r.status === 0;
+      })();
+      if (mlxVlmInVenv) {
+        row(ok, `mlx-vlm installed (venv) — will load caption model on first run`);
+        row(arrow, "Will auto-start when you run: bun run start");
+      } else {
+        row(warn, "mlx-vlm not installed in venv");
+        const doInstall = await confirm("Install mlx-vlm + torch deps via uv? (first run will download model weights)");
+        if (doInstall) {
+          console.log();
+          const success = runInherit("uv", ["sync", "--group", "mlx"]);
+          if (success) {
+            row(ok, "mlx-vlm installed into .venv");
+          } else {
+            row(fail, "uv sync --group mlx failed");
+            issues.push("Run `uv sync --group mlx` from the repo root to install mlx-vlm");
+          }
         } else {
-          row(warn, `Ollama at ${captionHost.replace(/\/v1$/, "")} returned status ${res.status}`);
+          issues.push("Run `uv sync --group mlx` from the repo root to install mlx-vlm");
         }
-      } catch {
-        row(warn, `Ollama not reachable at ${captionHost.replace(/\/v1$/, "")} — image captions will fall back to filenames`);
-        row(arrow, "Start Ollama with: ollama serve");
       }
-    } else {
-      row(ok, `Captioning provider: ${captionProvider} (${captionHost})`);
+    } else if (resolvedProvider === "llama") {
+      const hasLlamaServer = cmdExists("llama-server");
+      if (hasLlamaServer) {
+        row(ok, "llama-server found");
+        row(arrow, "Will auto-start when you run: bun run start");
+      } else {
+        row(warn, "llama-server not found");
+        if (IS_MAC) {
+          row(arrow, "Install with: brew install llama.cpp");
+        } else if (IS_LINUX) {
+          row(arrow, "Build from: https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md");
+        } else if (IS_WIN) {
+          row(arrow, "Download from: https://github.com/ggml-org/llama.cpp/releases");
+        }
+        issues.push("Install llama.cpp (llama-server) to enable local captioning");
+      }
     }
-    const captionModel = (cfg2 as any)?.captioning?.model ?? "engram-caption";
+    const captionModel = (cfg2 as any)?.captioning?.model ?? (IS_MAC_CAPTION ? "mlx-community/Qwen3.5-4B-MLX-4bit" : "unsloth/Qwen3.5-4B-GGUF");
     row(arrow, `Caption model: ${c.bold}${captionModel}${c.reset}`);
-    if (useOllama) {
-      row(arrow, `First run will auto-download ${c.bold}Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf${c.reset}`);
-      row(arrow, `Then it creates a local source model and aliases it to ${c.bold}${captionModel}${c.reset}`);
-      row(arrow, `If your Ollama build can't load that GGUF, it falls back to ${c.bold}qwen2.5vl:3b${c.reset}`);
+    if (resolvedProvider === "llama") {
+      row(arrow, `First run will auto-download GGUF via llama-server -hf`);
     }
   } else {
-    const ollamaInstalled = cmdExists("ollama");
-    if (ollamaInstalled) {
-      row(arrow, `Ollama installed — captioning is ${c.dim}disabled${c.reset}`);
-      row(arrow, `Enable by adding to config.json:`);
-      console.log(`    ${c.cyan}"captioning": { "host": "http://localhost:11434/v1" }${c.reset}`);
-      console.log(`    ${c.dim}Then run: bun run start (auto-downloads Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf)${c.reset}`);
-    } else {
-      row(arrow, `Ollama not installed — image captions disabled (filenames used instead)`);
-      row(arrow, `Install from: ${c.bold}https://ollama.com${c.reset}`);
-    }
+    row(arrow, `Captioning is ${c.dim}disabled${c.reset} — image captions will fall back to filenames`);
+    row(arrow, `Enable by adding to config.json:`);
+    console.log(`    ${c.cyan}"captioning": { "host": "http://localhost:8002/v1" }${c.reset}`);
+    console.log(`    ${c.dim}Then run: bun run start (auto-downloads model weights on first run)${c.reset}`);
   }
 
   // ── 6. ChromaDB (via uv + venv) ──────────────────────────────────────────────

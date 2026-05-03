@@ -47,15 +47,21 @@ const ConfigSchema = z.object({
       libreOfficePath: z.string().default("libreoffice"),
     })
     .default({}),
-captioning: z
+  captioning: z
     .object({
-      provider: z.enum(["auto", "ollama", "openai"]).default("auto"),
-      host: z.string().url().default("http://localhost:11434/v1"),
-      model: z.string().default("engram-caption"),
+      provider: z.enum(["auto", "mlx", "llama"]).default("auto"),
+      host: z.string().url().default("http://localhost:8002/v1"),
+      model: z.string().optional(),
       prompt: z.string().default("Describe this image concisely for search and retrieval."),
-      fallbackHost: z.string().url().optional(),
-      fallbackModel: z.string().optional(),
-      fallbackProvider: z.enum(["ollama", "openai"]).optional(),
+      maxTokens: z.number().int().min(1).default(256),
+      temperature: z.number().default(0.7),
+      topP: z.number().default(0.8),
+      topK: z.number().int().default(20),
+      minP: z.number().default(0.0),
+      presencePenalty: z.number().default(1.5),
+      repetitionPenalty: z.number().default(1.0),
+      think: z.boolean().default(false),
+      extraBody: z.record(z.unknown()).default({}),
     })
     .optional(),
 });
